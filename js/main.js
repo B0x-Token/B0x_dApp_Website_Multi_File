@@ -276,6 +276,7 @@ window.getMinerColor = MinerInfo.getMinerColor;
 window.getMinerNameLinkHTML = MinerInfo.getMinerNameLinkHTML;
 window.getMinerAddressFromTopic = MinerInfo.getMinerAddressFromTopic;
 window.convertHashRateToReadable2 = MinerInfo.convertHashRateToReadable2;
+window.loadMoreBlocks = MinerInfo.loadMoreBlocks;
 window.pool_colors = MinerInfo.pool_colors;
 
 // Rich list data loading

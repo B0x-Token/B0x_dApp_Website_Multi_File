@@ -105,6 +105,12 @@ export let lastDifficultyStartBlock = 0;
 export let sorted_miner_block_count_recent_hash = [];
 export let sorted_miner_block_count = [];
 
+// Block pagination state
+let allMinedBlocks = []; // Store all blocks
+let currentlyDisplayedBlocks = 0;
+const BLOCKS_PER_PAGE = 3000; // Show 3000 blocks at a time
+let blockRenderContext = null; // Store context for rendering (date_of_last_mint, etc)
+
 // ============================================
 // UTILITY FUNCTIONS
 // ============================================
@@ -351,6 +357,158 @@ export function showBlockDistributionPieChart2(piechart_dataset, piechart_labels
 }
 
 // ============================================
+// BLOCK PAGINATION FUNCTIONS
+// ============================================
+
+/**
+ * Renders a batch of blocks into the table
+ * @param {number} startIndex - Index to start rendering from
+ * @param {number} count - Number of blocks to render
+ * @param {boolean} append - If true, append to existing content; if false, replace
+ */
+function renderBlocksBatch(startIndex, count, append = false) {
+    if (!blockRenderContext) {
+        console.error('Block render context not initialized');
+        return;
+    }
+
+    const { get_date_from_eth_block, known_miners, _BLOCK_EXPLORER_TX_URL, _BLOCK_EXPLORER_BLOCK_URL } = blockRenderContext;
+
+    const endIndex = Math.min(startIndex + count, allMinedBlocks.length);
+    let innerhtml_buffer = '';
+
+    // Add header only if not appending
+    if (!append) {
+        innerhtml_buffer = '<tr><th>Time (Approx)</th><th>Base Block #</th>'
+            + '<th>Transaction Hash</th><th style="width: 200px;">Miner</th><th>Reward Amount</th></tr>';
+    }
+
+    let totalzkBTCMinted = 0.0;
+    let index = startIndex;
+
+    for (let i = startIndex; i < endIndex; i++) {
+        const block_info = allMinedBlocks[i];
+        const eth_block = parseInt(block_info[0]);
+        const tx_hash = block_info[1];
+        const addr = block_info[2];
+        const dataF = block_info[3].toFixed(4);
+        const epochCnt = block_info[4];
+
+        // Get the next block's epoch count
+        let nextEpochCnt = null;
+        if (i + 1 < allMinedBlocks.length) {
+            nextEpochCnt = allMinedBlocks[i + 1][4];
+        }
+
+        let epochCount;
+        if (nextEpochCnt !== null) {
+            epochCount = epochCnt - nextEpochCnt;
+        } else {
+            epochCount = epochCnt;
+        }
+
+        const formattedNumberfffff = new Intl.NumberFormat(navigator.language).format(dataF);
+        const miner_name_link = getMinerNameLinkHTML(addr, known_miners);
+        const transaction_url = _BLOCK_EXPLORER_TX_URL + tx_hash;
+        const block_url = _BLOCK_EXPLORER_BLOCK_URL + eth_block;
+
+        if (epochCnt) {
+            totalzkBTCMinted += parseFloat(epochCount);
+        }
+
+        if (formattedNumberfffff == -1) {
+            const parzedint = parseInt(totalzkBTCMinted);
+            totalzkBTCMinted = 0.0;
+
+            const formattedNumberparzedint = new Intl.NumberFormat(navigator.language).format(parzedint);
+
+            // Update the PREVIOUS "New Challenge" row with this period's count
+            const searchString = "PeriodNumberperiod";
+            const str = innerhtml_buffer;
+            const lastIndex = str.lastIndexOf(searchString);
+
+            if (lastIndex !== -1) {
+                const before = str.substring(0, lastIndex);
+                const after = str.substring(lastIndex + searchString.length);
+                innerhtml_buffer = before + formattedNumberparzedint + after;
+            }
+
+            // Add the new period row with placeholder for next update
+            if (eth_block > 36415630) {
+                innerhtml_buffer += '<tr><td id="statsTime"">'
+                    + get_date_from_eth_block(eth_block) + '</td><td>'
+                    + '<b>New difficulty period</b>' + '</td><td>'
+                    + '<b>New Challenge</b>'
+                    + '</td><td><b> Previous Period had</b></td><td class="stat-value"><b>PeriodNumberperiod Mints</b></td></tr>';
+            } else {
+                innerhtml_buffer += '<tr><td id="statsTime">'
+                    + get_date_from_eth_block(eth_block) + '</td><td>'
+                    + '<b>New difficulty period</b>' + '</td><td>'
+                    + '<b>New Challenge</b>'
+                    + '</td><td><b> Previous Period had</b></td><td class="stat-value"><b>2016 Mints</b></td></tr>';
+            }
+        } else {
+            innerhtml_buffer += '<tr><td id="statsTime">'
+                + get_date_from_eth_block(eth_block) + '</td><td class="hash2">'
+                + '<a href="' + block_url + '" target="_blank">' + eth_block + '</a></td><td class="hash">'
+                + '<a href="' + transaction_url + '" title="' + tx_hash + '" target="_blank">'
+                + tx_hash.substr(0, 16) + '...</a></td><td align="right" style="text-overflow:ellipsis;white-space: nowrap;overflow: hidden;">'
+                + '<span class="miner-cell">' + miner_name_link + '</span></td><td class="stat-value">'
+                + formattedNumberfffff + " B0x</td></tr>";
+        }
+    }
+
+    // Update DOM
+    const blockstatsEl = document.querySelector('#blockstats');
+    if (append) {
+        blockstatsEl.innerHTML += innerhtml_buffer;
+    } else {
+        blockstatsEl.innerHTML = innerhtml_buffer;
+    }
+
+    currentlyDisplayedBlocks = endIndex;
+
+    // Update status and button visibility
+    updateBlocksPaginationUI();
+}
+
+/**
+ * Updates the pagination UI (status text and button visibility)
+ */
+function updateBlocksPaginationUI() {
+    const container = document.getElementById('blocks-load-more-container');
+    const statusEl = document.getElementById('blocks-status');
+    const btnEl = document.getElementById('blocks-load-more-btn');
+
+    if (!container || !statusEl || !btnEl) return;
+
+    const totalBlocks = allMinedBlocks.length;
+    const remaining = totalBlocks - currentlyDisplayedBlocks;
+
+    if (remaining > 0) {
+        container.style.display = 'block';
+        statusEl.textContent = `Showing ${currentlyDisplayedBlocks.toLocaleString()} of ${totalBlocks.toLocaleString()} blocks (${remaining.toLocaleString()} remaining)`;
+        btnEl.style.display = 'inline-block';
+        btnEl.textContent = `Load ${Math.min(BLOCKS_PER_PAGE, remaining).toLocaleString()} More Blocks`;
+    } else if (totalBlocks > 0) {
+        container.style.display = 'block';
+        statusEl.textContent = `Showing all ${totalBlocks.toLocaleString()} blocks`;
+        btnEl.style.display = 'none';
+    } else {
+        container.style.display = 'none';
+    }
+}
+
+/**
+ * Handler for "Load More" button click
+ */
+export function loadMoreBlocks() {
+    if (currentlyDisplayedBlocks < allMinedBlocks.length) {
+        renderBlocksBatch(currentlyDisplayedBlocks, BLOCKS_PER_PAGE, true);
+    }
+}
+
+// ============================================
 // MAIN MINING INFO FUNCTIONS
 // ============================================
 
@@ -368,13 +526,20 @@ export async function updateAllMinerInfoFirst() {
     if (window.cachedContractStats && window.cachedContractStats.blockNumber) {
         blockNumber = parseInt(window.cachedContractStats.blockNumber);
         console.log("Using cached block number from super multicall:", blockNumber);
+    } else {
+        console.warn("window.cachedContractStats or blockNumber not available");
+        console.log("window.cachedContractStats:", window.cachedContractStats);
     }
 
-    // Use block number from cachedContractStats if available (from super multicall in staking.js)
+    // Use lastDifficultyStartBlock from cachedContractStats (from super multicall in staking.js)
+    // latestDiffPeriod = latestDifficultyPeriodStarted (block number, not timestamp)
     let lastBaseBlock = null;
     if (window.cachedContractStats && window.cachedContractStats.latestDiffPeriod) {
         lastBaseBlock = parseInt(window.cachedContractStats.latestDiffPeriod);
-        console.log("Using cached latestDiffPeriod2 or Last Base Block from super multicall:", lastBaseBlock);
+        console.log("Using cached latestDiffPeriod (lastDifficultyStartBlock) from super multicall:", lastBaseBlock);
+    } else {
+        console.warn("window.cachedContractStats or latestDiffPeriod not available");
+        console.log("window.cachedContractStats:", window.cachedContractStats);
     }
 
     await updateAllMinerInfo(provids, blockNumber, lastBaseBlock);
@@ -1305,97 +1470,24 @@ let epchCount;
         return result;
     }
 
-    var totalzkBTCMinted = 0.0;
-    var previousBlock = 0;
-    var index = 0;
-    var dt = new Date();
+    // Store blocks for pagination
+    allMinedBlocks = mined_blocks;
+    currentlyDisplayedBlocks = 0;
 
-    var innerhtml_buffer = '<tr><th>Time (Approx)</th><th>Base Block #</th>'
-        + '<th>Transaction Hash</th><th style="width: 200px;">Miner</th><th>Reward Amount</th></tr>';
+    // Store context needed for rendering
+    blockRenderContext = {
+        get_date_from_eth_block,
+        known_miners,
+        _BLOCK_EXPLORER_TX_URL,
+        _BLOCK_EXPLORER_BLOCK_URL
+    };
 
-    mined_blocks.forEach(function (block_info) {
-        var eth_block = parseInt(block_info[0]);
-        var tx_hash = block_info[1];
-        var addr = block_info[2];
-        var dataF = block_info[3].toFixed(4);
-        var epochCnt = block_info[4];
-
-        // Get the next block's epoch count
-        var nextEpochCnt = null;
-        if (index + 1 < mined_blocks.length) {
-            nextEpochCnt = mined_blocks[index + 1][4];
-        }
-
-        if (nextEpochCnt !== null) {
-            epochCount = epochCnt - nextEpochCnt;
-        } else {
-            epochCount = epochCnt;
-        }
-        index = index + 1;
-
-        const formattedNumberfffff = new Intl.NumberFormat(navigator.language).format(dataF);
-        var miner_name_link = getMinerNameLinkHTML(addr, known_miners);
-        var minerName = getMinerName(addr, known_miners);
-
-        var transaction_url = _BLOCK_EXPLORER_TX_URL + tx_hash;
-        var block_url = _BLOCK_EXPLORER_BLOCK_URL + eth_block;
-        if(epochCnt){
-        totalzkBTCMinted += parseFloat(epochCount);
-
-        }
-
-        if (formattedNumberfffff == -1) {
-            var parzedint = parseInt(totalzkBTCMinted);
-            totalzkBTCMinted = 0.0;
-
-            if (parzedint > 2016) {
-                // parzedint = 2016;
-            }
-
-            const formattedNumberparzedint = new Intl.NumberFormat(navigator.language).format(parzedint);
-
-            // Update the PREVIOUS "New Challenge" row with this period's count
-            var finalstr = "";
-            const searchString = "PeriodNumberperiod";
-            var str = innerhtml_buffer;
-            const lastIndex = str.lastIndexOf(searchString);
-            if (lastIndex === -1) {
-                finalstr = str;
-            } else {
-                const before = str.substring(0, lastIndex);
-                const after = str.substring(lastIndex + searchString.length);
-                finalstr = before + formattedNumberparzedint + after;
-            }
-            innerhtml_buffer = finalstr;
-
-            // Add the new period row with placeholder for next update
-            if (eth_block > 36415630) {
-                innerhtml_buffer += '<tr><td id="statsTime"">'
-                    + get_date_from_eth_block(eth_block) + '</td><td>'
-                    + '<b>New difficulty period</b>' + '</td><td>'
-                    + '<b>New Challenge</b>'
-                    + '</td><td><b> Previous Period had</b></td><td class="stat-value"><b>PeriodNumberperiod Mints</b></td></tr>';
-            } else {
-                innerhtml_buffer += '<tr><td id="statsTime">'
-                    + get_date_from_eth_block(eth_block) + '</td><td>'
-                    + '<b>New difficulty period</b>' + '</td><td>'
-                    + '<b>New Challenge</b>'
-                    + '</td><td><b> Previous Period had</b></td><td class="stat-value"><b>2016 Mints</b></td></tr>';
-            }
-        } else {
-            innerhtml_buffer += '<tr><td id="statsTime">'
-                + get_date_from_eth_block(eth_block) + '</td><td class="hash2">'
-                + '<a href="' + block_url + '" target="_blank">' + eth_block + '</a></td><td class="hash">'
-                + '<a href="' + transaction_url + '" title="' + tx_hash + '" target="_blank">'
-                + tx_hash.substr(0, 16) + '...</a></td><td align="right" style="text-overflow:ellipsis;white-space: nowrap;overflow: hidden;">'
-                + '<span class="miner-cell">' + miner_name_link + '</span></td><td class="stat-value">'
-                + formattedNumberfffff + " B0x</td></tr>";
-        }
-    });
-
+    // Render first batch of blocks (3000 by default)
     document.querySelector('#row-blocks').style.display = 'block';
     document.querySelector('#blockstats').style.display = 'block';
-    document.querySelector('#blockstats').innerHTML = innerhtml_buffer;
+
+    console.log(`Rendering first ${BLOCKS_PER_PAGE} of ${mined_blocks.length} total blocks`);
+    renderBlocksBatch(0, BLOCKS_PER_PAGE, false);
 
     console.log('done populating block stats');
 
@@ -1420,6 +1512,7 @@ export default {
     getMinerNameLinkHTML,
     getMinerAddressFromTopic,
     convertHashRateToReadable2,
+    loadMoreBlocks,
     pool_colors,
     known_miners
 };

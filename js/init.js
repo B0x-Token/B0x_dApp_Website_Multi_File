@@ -233,6 +233,16 @@ export function setupEventListeners() {
         });
     }
 
+    // Load More Blocks button (stats page pagination)
+    const loadMoreBlocksBtn = document.getElementById('blocks-load-more-btn');
+    if (loadMoreBlocksBtn) {
+        loadMoreBlocksBtn.addEventListener('click', () => {
+            if (typeof window.loadMoreBlocks === 'function') {
+                window.loadMoreBlocks();
+            }
+        });
+    }
+
     console.log('✓ Event listeners set up');
 }
 

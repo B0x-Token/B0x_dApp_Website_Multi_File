@@ -398,6 +398,12 @@ export async function switchTab(tabName) {
         console.log("SwitchTab2");
         switchTab2('stats-home');
 
+        // First run SUPER COMBINED MULTICALL to populate window.cachedContractStats
+        if (typeof window.getRewardStats === 'function') {
+            console.log("Running SUPER COMBINED MULTICALL via getRewardStats...");
+            await window.getRewardStats();
+        }
+
         // Load stats data if functions are available
         if (typeof window.GetContractStatsWithMultiCall === 'function') {
             const stats = await window.GetContractStatsWithMultiCall();
@@ -2262,11 +2268,11 @@ export function calculateHashrate(timePerEpoch, miningDifficulty) {
 
 /**
  * Calculate and display current network hashrate
- * Fetches mining difficulty and time per epoch from contract
+ * Uses data from SUPER COMBINED MULTICALL (window.rewardStatsCache)
  * Updates formattedHashrate export variable
  * @returns {Promise<number|null>} Calculated hashrate or null on error
  */
-export async function calculateAndDisplayHashrate(inflationMinedFromMulticall = null, miningDifficultyFromMulticall = null) {
+export async function calculateAndDisplayHashrate() {
     const currentTime = Date.now();
     const timeDiff = currentTime - prevTimeInFunc;
     console.log("prevHashrate:", prevHashrate);
@@ -2289,113 +2295,24 @@ export async function calculateAndDisplayHashrate(inflationMinedFromMulticall = 
     try {
         await sleep(500);
 
-        let timePerEpoch, miningDifficulty;
-
-        // Use results from SUPER COMBINED MULTICALL if provided
-        if (inflationMinedFromMulticall && miningDifficultyFromMulticall) {
-            console.log("Using data from SUPER COMBINED MULTICALL (no separate RPC call needed)");
-            timePerEpoch = inflationMinedFromMulticall.TimePerEpoch;
-            miningDifficulty = miningDifficultyFromMulticall;
-        } else {
-            // Fallback: make our own multicall if data not provided
-            console.log("Custom RPC:", customRPC);
-            const provider = new ethers.providers.JsonRpcProvider(customRPC);
-
-            // Define the two function signatures
-            const inflationMinedInterface = new ethers.utils.Interface([{
-                "inputs": [],
-                "name": "inflationMined",
-                "outputs": [
-                    {"internalType": "uint256", "name": "YearlyInflation", "type": "uint256"},
-                    {"internalType": "uint256", "name": "EpochsPerYear", "type": "uint256"},
-                    {"internalType": "uint256", "name": "RewardsAtTime", "type": "uint256"},
-                    {"internalType": "uint256", "name": "TimePerEpoch", "type": "uint256"}
-                ],
-                "stateMutability": "view",
-                "type": "function"
-            }]);
-
-            const getMiningDifficultyInterface = new ethers.utils.Interface([{
-                "inputs": [],
-                "name": "getMiningDifficulty",
-                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-                "stateMutability": "view",
-                "type": "function"
-            }]);
-
-            // Multicall3 ABI
-            const multicall3ABI = [{
-                "inputs": [
-                    {
-                        "components": [
-                            {"internalType": "address", "name": "target", "type": "address"},
-                            {"internalType": "bool", "name": "allowFailure", "type": "bool"},
-                            {"internalType": "bytes", "name": "callData", "type": "bytes"}
-                        ],
-                        "internalType": "struct Multicall3.Call3[]",
-                        "name": "calls",
-                        "type": "tuple[]"
-                    }
-                ],
-                "name": "aggregate3",
-                "outputs": [
-                    {
-                        "components": [
-                            {"internalType": "bool", "name": "success", "type": "bool"},
-                            {"internalType": "bytes", "name": "returnData", "type": "bytes"}
-                        ],
-                        "internalType": "struct Multicall3.Result[]",
-                        "name": "returnData",
-                        "type": "tuple[]"
-                    }
-                ],
-                "stateMutability": "view",
-                "type": "function"
-            }];
-
-            // Multicall3 contract address (same on most chains)
-            const multicall3Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
-
-            const multicall3Contract = new ethers.Contract(
-                multicall3Address,
-                multicall3ABI,
-                provider
-            );
-
-            // Encode the call data for both functions
-            const inflationMinedCallData = inflationMinedInterface.encodeFunctionData("inflationMined");
-            const getMiningDifficultyCallData = getMiningDifficultyInterface.encodeFunctionData("getMiningDifficulty");
-
-            // Prepare the calls array
-            const calls = [
-                {
-                    target: ProofOfWorkAddresss,
-                    allowFailure: false,
-                    callData: inflationMinedCallData
-                },
-                {
-                    target: ProofOfWorkAddresss,
-                    allowFailure: false,
-                    callData: getMiningDifficultyCallData
-                }
-            ];
-
-            // Execute multicall
-            const results = await multicall3Contract.aggregate3(calls);
-
-            // Decode results
-            const inflationMinedResult = inflationMinedInterface.decodeFunctionResult(
-                "inflationMined",
-                results[0].returnData
-            );
-            const miningDifficultyResult = getMiningDifficultyInterface.decodeFunctionResult(
-                "getMiningDifficulty",
-                results[1].returnData
-            );
-
-            timePerEpoch = inflationMinedResult[3];
-            miningDifficulty = miningDifficultyResult[0];
+        // Get data from SUPER COMBINED MULTICALL cache (window.cachedContractStats)
+        if (!window.cachedContractStats) {
+            console.error("cachedContractStats not populated yet, cannot calculate hashrate");
+            return null;
         }
+
+        const cachedContractStats = window.cachedContractStats;
+
+        // Validate required data is present
+        if (!cachedContractStats.inflationMined || !cachedContractStats.miningDifficulty) {
+            console.error("Missing required data in cachedContractStats");
+            return null;
+        }
+
+        console.log("Using data from SUPER COMBINED MULTICALL (no separate RPC call needed)");
+
+        const timePerEpoch = cachedContractStats.inflationMined.timePerEpoch;
+        const miningDifficulty = cachedContractStats.miningDifficulty;
 
         console.log("TimePerEpoch:", timePerEpoch);
         console.log("getMiningDifficulty:", miningDifficulty);

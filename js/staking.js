@@ -1137,9 +1137,9 @@ export async function getRewardStats() {
 
     await GetRewardAPY(rewardAddressesStaking, rewardtokenRewardRate, total0xBTCinContract, tokenSwapperResult);
 
-    // Pass inflationMined and miningDifficulty from SUPER COMBINED MULTICALL to avoid extra RPC call
+    // Calculate hashrate using data from SUPER COMBINED MULTICALL (already in window.rewardStatsCache)
     if (window.calculateAndDisplayHashrate) {
-        await window.calculateAndDisplayHashrate(inflationMined, miningDifficulty[0]);
+        await window.calculateAndDisplayHashrate();
     }
     if (window.updateWidget) await window.updateWidget();
 
