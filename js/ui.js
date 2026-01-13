@@ -10,7 +10,7 @@ import { TOKEN_ORDER, TOKEN_ORDERETH } from './utils.js';
 import { tokenIconsBase, tokenIconsETH, ProofOfWorkAddresss, tokenAddresses, contractAddress_Swapper, hookAddress } from './config.js';
 import { positionData, stakingPositionData } from './positions.js';
 import {functionCallCounter, incrementFunctionCallCounter, hasUserMadeSelection, customRPC} from './settings.js'
-import {firstRewardsAPYRun, APYFINAL} from './staking.js';
+import {firstRewardsAPYRun} from './staking.js';
 // =============================================================================
 // NOTIFICATION WIDGET CLASS
 // =============================================================================
@@ -693,9 +693,10 @@ let prevTimeInFunc2 = Date.now();
 
 var firstthree = 0;
 
-// Price state variables (accessed via window for compatibility with script.js)
-export let ratioB0xTo0xBTC = 0;
-export let usdCostB0x = 0;
+// Price state variables (stored on window for global access)
+// These are set directly on window object to avoid module read-only issues
+if (typeof window.ratioB0xTo0xBTC === 'undefined') window.ratioB0xTo0xBTC = 0;
+if (typeof window.usdCostB0x === 'undefined') window.usdCostB0x = 0;
 
 /**
  * Updates main widget with price and hashrate info
@@ -727,10 +728,17 @@ export async function updateWidget() {
 
     await calculateAndDisplayHashrate();
 
+    // Fetch 0xBTC and WETH prices from CoinGecko first
+    await fetchPriceData();
+
+    // Now calculate B0x price (depends on oxbtcPriceUSD being set)
+    // This function sets window.ratioB0xTo0xBTC and window.usdCostB0x directly
+    const priceData = await calculateB0xPrice();
+
     setTimeout(() => {
-        // Get values from window if they exist (for backwards compatibility)
-        const usdPrice = window.usdCostB0x || usdCostB0x || 0;
-        const btcPrice = window.ratioB0xTo0xBTC || ratioB0xTo0xBTC || 0;
+        // Use the values that were set on window by calculateB0xPrice
+        const usdPrice = window.usdCostB0x || 0;
+        const btcPrice = window.ratioB0xTo0xBTC || 0;
 
         if (usdPriceEl) usdPriceEl.textContent = `$${usdPrice.toFixed(4)}`;
         if (btcPriceEl) btcPriceEl.textContent = btcPrice.toFixed(6);
@@ -1808,69 +1816,18 @@ export async function updateStatsDisplay(stats) {
             window.CURRENT_MINING_TARGET = stats.miningTarget;
         }
 
-        // Fetch and update additional mining stats
-        // Note: Most contract stats are already in 'stats' from GetContractStatsWithMultiCall above
-        // We only need to fetch: Price (CoinGecko API), B0x price (swap contract), APY (staking), and Token Holders
+        // Update all mining and price stats
         try {
-            // Fetch price data from CoinGecko (external API - not in multicall)
-            const priceData = await fetchPriceData();
-
-            // Calculate B0x price using swap contract (separate call - not PoW contract)
-            const b0xPriceData = await calculateB0xPrice();
-
-            // Update price display
-            const priceEl = document.querySelector('.stat-value-price');
-            if (priceEl && b0xPriceData.usdCostB0x) {
-                priceEl.innerHTML = `${b0xPriceData.usdCostB0x.toFixed(4)} <span class="unit">$</span>`;
+            await updateAllMiningStats();
+            console.log('✓ All mining stats calculated and displayed');
+        } catch (statsError) {
+            console.warn('Failed to calculate all mining stats:', statsError);
+            // Fallback to just hashrate if comprehensive update fails
+            try {
+                await calculateAndDisplayHashrate();
+            } catch (hashrateError) {
+                console.warn('Failed to calculate hashrate:', hashrateError);
             }
-
-            // Update APY display (from staking module)
-            const apyEl = document.querySelector('.stat-value-stakeAPY');
-            const currentAPY = window.APYFINAL || APYFINAL || 0;
-            if (apyEl && currentAPY) {
-                apyEl.innerHTML = `${currentAPY.toFixed(2)} <span class="unit">%</span>`;
-            }
-
-            // Update difficulty from multicall stats (already fetched above)
-            const difficultyEl = document.querySelector('.stat-value-difficulty');
-            if (difficultyEl && stats.miningDifficulty) {
-                // Convert from contract units (difficulty is stored as difficulty * 524288)
-                const difficulty = parseFloat(stats.miningDifficulty) / 524_288;
-                difficultyEl.innerHTML = `${difficulty.toLocaleString(undefined, {maximumFractionDigits: 2})} <span class="detail">(mining difficulty)</span>`;
-            }
-
-            // Calculate and update hashrate (uses inflationMined.timePerEpoch and miningDifficulty from stats)
-            await calculateAndDisplayHashrate();
-            const hashrateEl = document.querySelector('.stat-value-hashrate');
-            if (hashrateEl && formattedHashrate) {
-                hashrateEl.innerHTML = `${formattedHashrate} <span class="detail">(network hashrate)</span>`;
-            }
-
-            // Update average reward time from multicall stats (already fetched above)
-            const avgRewardEl = document.querySelector('.stat-value-averageRewardTime');
-            const avgRewardTime = parseFloat(stats.inflationMined.timePerEpoch);
-            if (avgRewardEl && avgRewardTime) {
-                avgRewardEl.innerHTML = `${avgRewardTime.toFixed(1)} <span class="detail">seconds</span>`;
-            }
-
-            // Update reward per solve from multicall stats (already fetched above)
-            const rewardPerSolveEl = document.querySelector('.stat-value-rewardPerSolve');
-            const rewardPerSolve = parseFloat(stats.inflationMined.rewardsAtTime) / 1e18;
-            if (rewardPerSolveEl && rewardPerSolve) {
-                rewardPerSolveEl.innerHTML = `${rewardPerSolve.toFixed(2)} <span class="detail">B0x per solve</span>`;
-            }
-
-            // Update token holders (placeholder - needs separate API integration)
-            const tokenHolders = await getTokenHolders();
-            const holdersEl = document.querySelector('.stat-value-tokenHolders');
-            if (holdersEl && tokenHolders) {
-                holdersEl.textContent = tokenHolders.toLocaleString();
-            }
-
-            console.log('✓ Additional mining stats updated successfully');
-
-        } catch (error) {
-            console.error('Error updating additional mining stats:', error);
         }
 
         console.log('✓ Stats display updated successfully');
@@ -2185,7 +2142,7 @@ export async function fetchPriceData() {
         return { wethPriceUSD: wethPrice, oxbtcPriceUSD: oxbtcPrice };
     } catch (error) {
         console.error("Error fetching CoinGecko prices:", error);
-        return { wethPriceUSD: 0, oxbtcPriceUSD: 0 };
+        return { wethPriceUSD: 3000, oxbtcPriceUSD: 0.0 };
     }
 }
 
@@ -2238,13 +2195,19 @@ export async function calculateB0xPrice() {
         // Get current 0xBTC price
         const oxbtcPrice = window.oxbtcPriceUSD || 0;
 
-        ratioB0xTo0xBTC = exchangeRate;
-        usdCostB0x = exchangeRate * oxbtcPrice;
+        // Set values directly on window object for global access
+        window.ratioB0xTo0xBTC = exchangeRate;
+        window.usdCostB0x = exchangeRate * oxbtcPrice;
 
-        console.log("B0x to 0xBTC ratio:", ratioB0xTo0xBTC);
-        console.log("USD cost of B0x:", usdCostB0x);
+        console.log("B0x to 0xBTC ratio:", window.ratioB0xTo0xBTC);
+        console.log("USD cost of B0x:", window.usdCostB0x);
+        console.log("0xBTC price used:", oxbtcPrice);
 
-        return { ratioB0xTo0xBTC, usdCostB0x };
+        if (oxbtcPrice === 0) {
+            console.warn("Warning: 0xBTC price is 0, USD cost will be 0");
+        }
+
+        return { ratioB0xTo0xBTC: window.ratioB0xTo0xBTC, usdCostB0x: window.usdCostB0x };
     } catch (error) {
         console.error("Error calculating B0x price:", error);
         return { ratioB0xTo0xBTC: 0, usdCostB0x: 0 };
@@ -2422,37 +2385,72 @@ export async function getTokenHolders() {
     return 1000;
 }
 
+// Rate limiting for stats updates
+let lastStatsUpdate = 0;
+let cachedStats = null;
+const STATS_UPDATE_COOLDOWN = 180000; // 180 seconds in milliseconds
+
+/**
+ * Get time remaining until next stats update is allowed
+ * @returns {number} Seconds remaining (0 if update is available)
+ */
+export function getStatsUpdateCooldown() {
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastStatsUpdate;
+    const remainingTime = Math.max(0, STATS_UPDATE_COOLDOWN - timeSinceLastUpdate);
+    return Math.ceil(remainingTime / 1000);
+}
+
 /**
  * Comprehensive stats update function
  * Fetches all mining and price stats and updates the display
+ * Rate limited to once every 180 seconds to reduce RPC load
+ * @param {boolean} forceUpdate - Force update even if cooldown hasn't passed
  * @returns {Promise<Object>} Object containing all stats
  */
-export async function updateAllMiningStats() {
+export async function updateAllMiningStats(forceUpdate = false) {
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastStatsUpdate;
+
+    // Return cached stats if cooldown hasn't passed and not forcing update
+    if (!forceUpdate && cachedStats && timeSinceLastUpdate < STATS_UPDATE_COOLDOWN) {
+        const remainingTime = Math.ceil((STATS_UPDATE_COOLDOWN - timeSinceLastUpdate) / 1000);
+        console.log(`Using cached stats (updates again in ${remainingTime}s)`);
+
+        // Still update the display with cached data
+        updateMiningStatsDisplay(cachedStats);
+        return cachedStats;
+    }
+
     console.log('Updating all mining stats...');
 
     try {
-        const provider = new ethers.providers.JsonRpcProvider(customRPC);
+        // Ensure APY is calculated by calling getRewardStats
+        // This calls GetRewardAPY internally which sets window.APYFINAL
+        if (window.getRewardStats) {
+            try {
+                await window.getRewardStats();
+                console.log('✓ APY calculated:', window.APYFINAL);
+            } catch (apyError) {
+                console.warn('Failed to calculate APY:', apyError);
+            }
+        }
 
-        // Fetch all data in parallel where possible
+        // Use multicall to fetch contract stats efficiently (single RPC call)
         const [
+            contractStats,
             priceData,
-            difficulty,
-            epochCount,
-            inflationData,
-            blocksToReadjust,
-            timeEmergency,
-            rewardEra,
             tokenHolders
         ] = await Promise.all([
+            window.GetContractStatsWithMultiCall ? window.GetContractStatsWithMultiCall() : null,
             fetchPriceData(),
-            getDifficulty(provider),
-            getEpochCount(provider),
-            getAvgRewardTime(provider),
-            getBlocksToReadjust(provider),
-            getTimeEmergency(provider),
-            getRewardEra(provider),
             getTokenHolders()
         ]);
+
+        if (!contractStats) {
+            console.error('Failed to fetch contract stats via multicall');
+            return null;
+        }
 
         // Calculate B0x price after we have 0xBTC price
         const b0xPriceData = await calculateB0xPrice();
@@ -2460,35 +2458,52 @@ export async function updateAllMiningStats() {
         // Calculate hashrate
         await calculateAndDisplayHashrate();
 
-        // Calculate reward per solve
-        const rewardPerSolve = parseFloat(inflationData.RewardsAtTime) / 1e18;
-        const avgRewardTime = parseFloat(inflationData.TimePerEpoch);
+        // Extract values from multicall result
+        const rewardPerSolve = parseFloat(contractStats.inflationMined.rewardsAtTime) / 1e18;
+        const avgRewardTime = parseFloat(contractStats.inflationMined.timePerEpoch);
+        const difficulty = parseFloat(contractStats.miningDifficulty);
 
         const stats = {
             price: b0xPriceData.usdCostB0x,
             wethPriceUSD: priceData.wethPriceUSD,
             oxbtcPriceUSD: priceData.oxbtcPriceUSD,
             ratioB0xTo0xBTC: b0xPriceData.ratioB0xTo0xBTC,
-            apy: window.APYFINAL || APYFINAL || 0,
-            difficulty: parseFloat(difficulty),
+            apy: window.APYFINAL || 0,
+            difficulty: difficulty,
             hashrate: formattedHashrate,
             avgRewardTime: avgRewardTime,
             rewardPerSolve: rewardPerSolve,
-            epochCount: parseInt(epochCount),
-            blocksToReadjust: parseInt(blocksToReadjust),
-            timeEmergency: parseInt(timeEmergency),
-            rewardEra: parseInt(rewardEra),
-            tokenHolders: tokenHolders
+            epochCount: parseInt(contractStats.epochCount),
+            blocksToReadjust: parseInt(contractStats.blocksToReadjust),
+            timeEmergency: parseInt(contractStats.secondsUntilSwitch),
+            rewardEra: parseInt(contractStats.rewardEra),
+            tokenHolders: tokenHolders,
+            // Additional multicall data
+            miningTarget: contractStats.miningTarget,
+            tokensMinted: contractStats.tokensMinted,
+            maxSupplyForEra: contractStats.maxSupplyForEra,
+            latestDiffPeriod: contractStats.latestDiffPeriod,
+            latestDiffPeriod2: contractStats.latestDiffPeriod2,
+            readjustDifficulty: contractStats.readjustDifficulty
         };
 
         // Update DOM elements
         updateMiningStatsDisplay(stats);
 
-        console.log('✓ All mining stats updated successfully');
+        // Cache the stats and update timestamp
+        cachedStats = stats;
+        lastStatsUpdate = now;
+
+        console.log('✓ All mining stats updated successfully using multicall (cached for 180s)');
         return stats;
 
     } catch (error) {
         console.error('Error updating all mining stats:', error);
+        // Return cached stats if available, even on error
+        if (cachedStats) {
+            console.log('Returning cached stats due to error');
+            return cachedStats;
+        }
         return null;
     }
 }
@@ -2509,7 +2524,7 @@ export function updateMiningStatsDisplay(stats) {
 
         // Update APY
         const apyEl = document.querySelector('.stat-value-stakeAPY');
-        if (apyEl && stats.apy) {
+        if (apyEl && stats.apy !== undefined && stats.apy !== null) {
             apyEl.innerHTML = `${stats.apy.toFixed(2)} <span class="unit">%</span>`;
         }
 

@@ -1715,4 +1715,48 @@ export async function executeOptimizedMultiRouteSwap(fromToken, toToken, amountS
     }
 }
 
+// ============================================================================
+// AMOUNT INPUT DEBOUNCE HANDLER
+// ============================================================================
+
+let debounceTimerSwap;
+
+/**
+ * Handle amount input changes with debouncing
+ * Triggers getEstimate after 1 second of no input
+ */
+function handleAmountChange() {
+    const amount = parseFloat(this.value) || 0;
+    console.log("Amount changed:", amount);
+
+    // Clear the previous timer
+    clearTimeout(debounceTimerSwap);
+
+    // Only call getEstimate if amount > 0
+    if (amount > 0) {
+        // Set a new timer for 1 second delay
+        debounceTimerSwap = setTimeout(() => {
+            getEstimate();
+        }, 1000); // 1000ms = 1 second delay
+    }
+}
+
+/**
+ * Initialize amount input event listeners when DOM is ready
+ */
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Swaps.js: Setting up amount input event listeners...');
+
+    const amountInput = document.querySelector('#swap .form-group:nth-child(5) input');
+
+    if (amountInput) {
+        console.log('Swaps.js: Amount input found, attaching listeners');
+        // Listen for both input and change events
+        amountInput.addEventListener('input', handleAmountChange);
+        amountInput.addEventListener('change', handleAmountChange);
+    } else {
+        console.error('Swaps.js: Amount input not found with selector: #swap .form-group:nth-child(5) input');
+    }
+});
+
 console.log('Swaps module initialized');

@@ -49,7 +49,9 @@ import {
 // STATE VARIABLES
 // ============================================
 
-export let APYFINAL = 0;
+// Initialize APY on window for global access (avoid module read-only issues)
+if (typeof window.APYFINAL === 'undefined') window.APYFINAL = 0;
+
 export let totalLiquidityInStakingContract = 0;
 export let Rewardduration = 0;
 
@@ -625,6 +627,9 @@ export async function withdrawNFTStake() {
  * @param {string} zeroXBTC_In_Staking - Amount of 0xBTC staked
  * @returns {Promise<number>} Calculated APY
  */
+
+    let amountOut_Saved = 0;
+    let result = 0;
 export async function GetRewardAPY(_tokenAddresses, _rewardRate, zeroXBTC_In_Staking) {
     let total_rewardRate_WETH = 0;
     let total_rewardRate_0xBTC = 0;
@@ -671,9 +676,6 @@ export async function GetRewardAPY(_tokenAddresses, _rewardRate, zeroXBTC_In_Sta
 
     const tokenInputAddress = tokenAddresses['B0x'];
     let amountToSwap = BigInt(10 ** 18);
-    let result = 0;
-    let amountOut_Saved = 0;
-
     if (lastWETHto0xBTCRateUpdate2 < Date.now() - 120000) {
         try {
             result = await tokenSwapperContract.callStatic.getOutput(
@@ -761,12 +763,13 @@ export async function GetRewardAPY(_tokenAddresses, _rewardRate, zeroXBTC_In_Sta
     const total0xbtcStaked = (zeroXBTC_In_Staking * 2) / 10 ** 8;
     console.log("total 0xBTC staked in both pools", total0xbtcStaked);
 
-    APYFINAL = total_0xBTC_gained_Yearly / total0xbtcStaked * 100;
-    console.log("APY info total gained yearly / total staked * 100", APYFINAL);
+    // Set APY on window object for global access
+    window.APYFINAL = total_0xBTC_gained_Yearly / total0xbtcStaked * 100;
+    console.log("APY info total gained yearly / total staked * 100", window.APYFINAL);
 
     firstRewardsAPYRun = firstRewardsAPYRun + 1;
 
-    return APYFINAL;
+    return window.APYFINAL;
 }
 
 /**

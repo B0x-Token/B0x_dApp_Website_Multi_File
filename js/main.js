@@ -260,6 +260,7 @@ window.getRewardEra = UI.getRewardEra;
 window.getTokenHolders = UI.getTokenHolders;
 window.updateAllMiningStats = UI.updateAllMiningStats;
 window.updateMiningStatsDisplay = UI.updateMiningStatsDisplay;
+window.getStatsUpdateCooldown = UI.getStatsUpdateCooldown;
 
 // Miner info and rich list functions
 window.updateAllMinerInfoFirst = MinerInfo.updateAllMinerInfoFirst;
@@ -275,15 +276,14 @@ window.convertHashRateToReadable2 = MinerInfo.convertHashRateToReadable2;
 window.pool_colors = MinerInfo.pool_colors;
 window.known_miners = MinerInfo.known_miners;
 
-// Price variables (reactive access to UI module state)
-Object.defineProperty(window, 'ratioB0xTo0xBTC', {
-    get: () => UI.ratioB0xTo0xBTC,
-    set: (val) => { UI.ratioB0xTo0xBTC = val; }
-});
-Object.defineProperty(window, 'usdCostB0x', {
-    get: () => UI.usdCostB0x,
-    set: (val) => { UI.usdCostB0x = val; }
-});
+// Price variables are now set directly on window object in ui.js
+// No need for property descriptors since they're native window properties
+// Initialize them if they don't exist
+if (typeof window.ratioB0xTo0xBTC === 'undefined') window.ratioB0xTo0xBTC = 0;
+if (typeof window.usdCostB0x === 'undefined') window.usdCostB0x = 0;
+
+// APY variable is set in staking.js (GetRewardAPY function)
+if (typeof window.APYFINAL === 'undefined') window.APYFINAL = 0;
 
 // Formatting
 window.formatNumberWithCommas = UI.formatNumberWithCommas;
@@ -388,6 +388,7 @@ window.toBigNumber = Contracts.toBigNumber;
 
 // Data Loader module
 window.GetContractStatsWithMultiCall = DataLoader.GetContractStatsWithMultiCall;
+window.getContractStatsCooldown = DataLoader.getContractStatsCooldown;
 window.fetchDataFromUrl = DataLoader.fetchDataFromUrl;
 window.mainRPCStarterForPositions = DataLoader.mainRPCStarterForPositions;
 window.getNFTOwners = DataLoader.getNFTOwners;

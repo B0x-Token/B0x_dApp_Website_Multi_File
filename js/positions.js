@@ -46,7 +46,7 @@ let HookAddress = hookAddress;
 let permit2Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 let Current_getsqrtPricex96 = toBigNumber(0);
 let nftOwners = {};
-let APYFINAL = 0;
+// APYFINAL is now stored on window object (set in staking.js)
 let WhereToStartSearch = 0;
 let WhereToStartSearchStaked = 0;
 let WeAreSearchingLogsRightNow = false;
@@ -578,7 +578,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
                 currentTokenB: formattedToken2,
                 tokenAIcon: tokenASymbol ? tokenASymbol[0] : "?",
                 tokenBIcon: tokenBSymbol ? tokenBSymbol[0] : "?",
-                apy: APYFINAL.toFixed(2) + "%",
+                apy: (window.APYFINAL || 0).toFixed(2) + "%",
                 PenaltyForWithdraw: penaltyWithdrawString
             };
         } catch (error) {

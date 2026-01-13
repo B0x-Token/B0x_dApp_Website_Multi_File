@@ -132,13 +132,41 @@ export function triggerRefresh() { forceRefresh = true; }
 // CONTRACT STATS FETCHING
 // ============================================
 
+// Rate limiting for contract stats
+let lastContractStatsUpdate = 0;
+let cachedContractStats = null;
+const CONTRACT_STATS_COOLDOWN = 180000; // 180 seconds in milliseconds
+
+/**
+ * Get time remaining until next contract stats update is allowed
+ * @returns {number} Seconds remaining (0 if update is available)
+ */
+export function getContractStatsCooldown() {
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastContractStatsUpdate;
+    const remainingTime = Math.max(0, CONTRACT_STATS_COOLDOWN - timeSinceLastUpdate);
+    return Math.ceil(remainingTime / 1000);
+}
+
 /**
  * Fetches contract statistics using multicall for efficiency
  * Gets mining stats, difficulty, rewards, etc. in a single call
+ * Rate limited to once every 180 seconds to reduce RPC load
  * @async
+ * @param {boolean} forceUpdate - Force update even if cooldown hasn't passed
  * @returns {Promise<Object>} Contract statistics object
  */
-export async function GetContractStatsWithMultiCall() {
+export async function GetContractStatsWithMultiCall(forceUpdate = false) {
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastContractStatsUpdate;
+
+    // Return cached stats if cooldown hasn't passed and not forcing update
+    if (!forceUpdate && cachedContractStats && timeSinceLastUpdate < CONTRACT_STATS_COOLDOWN) {
+        const remainingTime = Math.ceil((CONTRACT_STATS_COOLDOWN - timeSinceLastUpdate) / 1000);
+        console.log(`Using cached contract stats (updates again in ${remainingTime}s)`);
+        return cachedContractStats;
+    }
+
     // Connect if not already connected
     if (!window.walletConnected) {
         if (window.connectTempRPCforStats) {
@@ -221,8 +249,8 @@ export async function GetContractStatsWithMultiCall() {
             return contractInterface.decodeFunctionResult(functionName, data);
         });
 
-        // Return formatted stats
-        return {
+        // Format stats object
+        const stats = {
             blockNumber: blockNumber.toString(),
             miningTarget: miningTarget[0].toString(),
             miningDifficulty: miningDifficulty[0].toString(),
@@ -243,8 +271,22 @@ export async function GetContractStatsWithMultiCall() {
             maxSupplyForEra: maxSupplyForEra[0].toString()
         };
 
+        // Cache the stats and update timestamp
+        cachedContractStats = stats;
+        lastContractStatsUpdate = now;
+
+        console.log('✓ Contract stats fetched and cached for 180s');
+        return stats;
+
     } catch (error) {
         console.error("Error in GetContractStatsWithMultiCall:", error);
+
+        // Return cached stats if available, even on error
+        if (cachedContractStats) {
+            console.log('Returning cached contract stats due to error');
+            return cachedContractStats;
+        }
+
         throw error;
     }
 }

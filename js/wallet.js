@@ -54,6 +54,11 @@ let connectionState = {
     isRecovering: false
 };
 
+/**
+ * Connection lock to prevent simultaneous connection attempts
+ */
+let isConnecting = false;
+
 // ============================================================================
 // WALLET STATE SETTERS
 // ============================================================================
@@ -153,10 +158,19 @@ export async function quickconnectWallet() {
         return userAddress;
     }
 
+    // Check if connection is already in progress
+    if (isConnecting) {
+        console.log('Connection already in progress, ignoring duplicate call');
+        return null;
+    }
+
     if (typeof window.ethereum === 'undefined') {
         alert('Please install MetaMask or Rabby wallet!');
         return null;
     }
+
+    // Set connection lock
+    isConnecting = true;
 
     try {
         const accounts = await window.ethereum.request({
@@ -192,10 +206,17 @@ export async function quickconnectWallet() {
             // - await throttledGetSqrtRtAndPriceRatio("ConnectWallet");
             // - await getRewardStats();
 
+            // Release connection lock on success
+            isConnecting = false;
+
             return userAddress;
         }
     } catch (error) {
         handleWalletError(error);
+
+        // Release connection lock on error
+        isConnecting = false;
+
         return null;
     }
 }
@@ -233,9 +254,16 @@ async function withNetworkRetry(fn, maxRetries = 3, stepName = '') {
 export async function connectWallet(resumeFromStep = null) {
     console.log("Connect Wallet", resumeFromStep ? `(resuming from: ${resumeFromStep})` : '');
 
+    // Check if already connected
     if (walletConnected && !resumeFromStep) {
         console.log('Wallet already connected');
         return userAddress;
+    }
+
+    // Check if connection is already in progress
+    if (isConnecting && !resumeFromStep) {
+        console.log('Connection already in progress, ignoring duplicate call');
+        return null;
     }
 
     if (typeof window.ethereum === 'undefined') {
@@ -243,12 +271,16 @@ export async function connectWallet(resumeFromStep = null) {
         return null;
     }
 
+    // Set connection lock
+    isConnecting = true;
+
     attemptf2f21 = attemptf2f21 + 1;
     if (attemptf2f21 > 2) {
         alert("A connection request is already pending in your wallet. The page will refresh to clear this. Please connect wallet and approve the connection after refresh.");
         setTimeout(() => {
             window.location.reload();
         }, 2000);
+        isConnecting = false;
         return null;
     }
 
@@ -395,6 +427,10 @@ export async function connectWallet(resumeFromStep = null) {
         connectionState.isRecovering = false;
         connectionState.lastStep = 'completed';
 
+        // Release connection lock on success
+        isConnecting = false;
+        attemptf2f21 = 0;
+
         return userAddress;
 
     } catch (error) {
@@ -407,6 +443,10 @@ export async function connectWallet(resumeFromStep = null) {
         console.log("Error25: ", error);
         handleWalletError(error);
         connectionState.isRecovering = false;
+
+        // Release connection lock on error
+        isConnecting = false;
+
         return null;
     }
 }
