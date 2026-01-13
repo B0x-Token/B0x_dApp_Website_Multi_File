@@ -160,6 +160,14 @@ export async function GetContractStatsWithMultiCall(forceUpdate = false) {
     const now = Date.now();
     const timeSinceLastUpdate = now - lastContractStatsUpdate;
 
+    // Check if we have cached stats from the combined multicall in getRewardStats
+    if (!forceUpdate && window.cachedContractStats) {
+        console.log(`Using contract stats from combined multicall in getRewardStats`);
+        cachedContractStats = window.cachedContractStats;
+        lastContractStatsUpdate = now;
+        return cachedContractStats;
+    }
+
     // Return cached stats if cooldown hasn't passed and not forcing update
     if (!forceUpdate && cachedContractStats && timeSinceLastUpdate < CONTRACT_STATS_COOLDOWN) {
         const remainingTime = Math.ceil((CONTRACT_STATS_COOLDOWN - timeSinceLastUpdate) / 1000);

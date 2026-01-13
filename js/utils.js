@@ -7,7 +7,7 @@
 // ============================================================================
 
 import { tokenAddresses, tokenAddressesETH, tokenMap } from './config.js';
-
+import {userAddress} from './wallet.js';
 // ============================================================================
 // TOKEN DECIMALS CONFIGURATION
 // ============================================================================
@@ -339,7 +339,7 @@ export async function fetchTokenBalanceWithEthersETH(
  * @returns {Promise<Object>} Object containing all token balances
  */
 export async function fetchBalances(
-    userAddress,
+    userAddress2,
     tokenAddresses,
     tokenAddressesDecimals,
     fetchTokenBalanceWithEthers,
@@ -403,7 +403,7 @@ export async function fetchBalances(
  * @returns {Promise<Object>} Object containing all token balances
  */
 export async function fetchBalancesETH(
-    userAddress,
+    userAddress2,
     tokenAddressesETH,
     tokenAddressesDecimalsETH,
     fetchTokenBalanceWithEthersETH,
@@ -465,6 +465,89 @@ export const TOKEN_ORDER = ['ETH', 'B0x', '0xBTC', 'USDC', 'DAI', 'WBTC'];
  * Fixed token order for consistent UI display (Ethereum network)
  */
 export const TOKEN_ORDERETH = ['ETH', '0xBTC', 'B0x', 'RightsTo0xBTC', 'DAI', 'WBTC'];
+
+// ============================================================================
+// COINGECKO PRICE CACHING
+// ============================================================================
+
+const COINGECKO_CACHE_KEY = 'coingecko_price_cache';
+const COINGECKO_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+/**
+ * Fetches CoinGecko prices with 5-minute localStorage caching
+ * Prevents excessive API calls and persists across page reloads
+ * @returns {Promise<{wethPriceUSD: number, oxbtcPriceUSD: number, timestamp: number}>}
+ */
+export async function getCoinGeckoPrices() {
+    try {
+        // Try to load from localStorage first
+        const cachedData = localStorage.getItem(COINGECKO_CACHE_KEY);
+
+        if (cachedData) {
+            const parsed = JSON.parse(cachedData);
+            const age = Date.now() - parsed.timestamp;
+
+            // If cache is fresh (less than 5 minutes old), return it
+            if (age < COINGECKO_CACHE_DURATION) {
+                const remainingSeconds = Math.ceil((COINGECKO_CACHE_DURATION - age) / 1000);
+                console.log(`Using cached CoinGecko prices (refreshes in ${remainingSeconds}s)`);
+                return {
+                    wethPriceUSD: parsed.wethPriceUSD,
+                    oxbtcPriceUSD: parsed.oxbtcPriceUSD,
+                    timestamp: parsed.timestamp
+                };
+            }
+        }
+
+        // Cache is stale or doesn't exist, fetch new data
+        console.log('Fetching fresh CoinGecko prices...');
+        const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=weth,oxbitcoin&vs_currencies=usd');
+
+        if (!response.ok) {
+            throw new Error(`CoinGecko API returned ${response.status}`);
+        }
+
+        const data = await response.json();
+        const wethPriceUSD = data.weth.usd;
+        const oxbtcPriceUSD = data['oxbitcoin'].usd;
+
+        // Save to localStorage with timestamp
+        const cacheData = {
+            wethPriceUSD,
+            oxbtcPriceUSD,
+            timestamp: Date.now()
+        };
+        localStorage.setItem(COINGECKO_CACHE_KEY, JSON.stringify(cacheData));
+
+        console.log('CoinGecko prices fetched and cached:', { wethPriceUSD, oxbtcPriceUSD });
+
+        return cacheData;
+
+    } catch (error) {
+        console.error('Error fetching CoinGecko prices:', error);
+
+        // Try to return stale cache if available (better than nothing)
+        const cachedData = localStorage.getItem(COINGECKO_CACHE_KEY);
+        if (cachedData) {
+            const parsed = JSON.parse(cachedData);
+            const ageMinutes = Math.floor((Date.now() - parsed.timestamp) / 60000);
+            console.warn(`CoinGecko fetch failed, using stale cache (${ageMinutes} minutes old)`);
+            return {
+                wethPriceUSD: parsed.wethPriceUSD,
+                oxbtcPriceUSD: parsed.oxbtcPriceUSD,
+                timestamp: parsed.timestamp
+            };
+        }
+
+        // No cache available, return defaults
+        console.warn('No cached prices available, using defaults');
+        return {
+            wethPriceUSD: 3000,
+            oxbtcPriceUSD: 0.5,
+            timestamp: Date.now()
+        };
+    }
+}
 
 // ============================================================================
 // EXPORTS SUMMARY

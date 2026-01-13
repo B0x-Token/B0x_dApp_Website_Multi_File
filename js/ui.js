@@ -9,7 +9,7 @@
 import { TOKEN_ORDER, TOKEN_ORDERETH } from './utils.js';
 import { tokenIconsBase, tokenIconsETH, ProofOfWorkAddresss, tokenAddresses, contractAddress_Swapper, hookAddress } from './config.js';
 import { positionData, stakingPositionData } from './positions.js';
-import {functionCallCounter, incrementFunctionCallCounter, hasUserMadeSelection, customRPC} from './settings.js'
+import {functionCallCounter, incrementFunctionCallCounter, hasUserMadeSelection, customRPC, customDataSource, customBACKUPDataSource} from './settings.js'
 import {firstRewardsAPYRun} from './staking.js';
 // =============================================================================
 // NOTIFICATION WIDGET CLASS
@@ -357,6 +357,7 @@ let PreviousTabName = "";
  * @param {string} tabName - Name of tab to switch to
  */
 export async function switchTab(tabName) {
+
     var name = '#' + tabName;
     getNotificationWidget().positionInContainer(name);
 
@@ -394,6 +395,7 @@ export async function switchTab(tabName) {
     }
     // Tab-specific data loading
     if (tabName == 'stats' && PreviousTabName != 'stats') {
+        console.log("SwitchTab2");
         switchTab2('stats-home');
 
         // Load stats data if functions are available
@@ -413,6 +415,10 @@ export async function switchTab(tabName) {
         }
         if (typeof window.updateStakingStats === 'function') {
             window.updateStakingStats();
+        }
+        // Update staking values from stored amounts
+        if (typeof window.updateStakingValuesFromStored === 'function') {
+            window.updateStakingValuesFromStored();
         }
     } else if (tabName === 'liquidity-positions') {
         // Load position data when switching to positions tab
@@ -469,6 +475,7 @@ export async function switchTabForStats() {
     }
 
     if (tabName == 'stats' && PreviousTabName != 'stats') {
+        console.log("SwitchTab2 here");
         switchTab2('stats-home');
         await GetContractStatsWithMultiCall();
         await updateAllMinerInfoFirst();
@@ -482,7 +489,7 @@ export async function switchTabForStats() {
         });
     }
     PreviousTabName = tabName;
-
+    console.log("previousTabName: ", PreviousTabName);
     if (tabName === 'stats') {
         document.querySelector('.content').style.padding = '0px';
     } else {
@@ -1302,7 +1309,8 @@ export function updateStakingValues(stakedAmounts, apy) {
 
     const apyElement = document.getElementById('APYPercentage');
     if (apyElement) {
-        apyElement.textContent = `${apy}%`;
+        console.log("WINDOW APY FINAL IS: ",window.APYFINAL);
+        apyElement.textContent = `${window.APYFINAL}%`;
     }
 }
 
@@ -1429,6 +1437,304 @@ export function updatePositionDropdown() {
     }
 
     updatePositionInfoMAIN_STAKING();
+}
+
+// =============================================================================
+// RICH LIST DATA LOADING
+// =============================================================================
+
+// State variables for staking rich list (loadData2)
+let stakingData = null;
+let filteredData = [];
+let currentPage = 1;
+let pageSize = 25;
+
+// State variables for B0x rich list (loadData)
+let baseData = [];
+let ethData = [];
+let combinedData = [];
+let filteredData2 = [];
+let currentPage2 = 1;
+let pageSize2 = 25;
+let currentSort = 'b0x';
+let sortByB0xBaseChain = true;
+
+/**
+ * Loads staking rich list data from primary or backup sources
+ * @async
+ */
+export async function loadData2() {
+    const primaryUrl = customDataSource + 'B0x_Staking_Rich_List_logs_mainnet.json';
+    const backupUrl = customBACKUPDataSource + 'B0x_Staking_Rich_List_logs_mainnet.json';
+
+    try {
+        document.getElementById('tableContent55').innerHTML = '<div class="loading55">Loading staking data...</div>';
+
+        console.log('Fetching staking data from primary source...');
+        const response = await fetch(primaryUrl);
+        console.log("RESPONSE URL: ", primaryUrl);
+
+        if (!response.ok) {
+            throw new Error(`Primary source failed with status: ${response.status}`);
+        }
+
+        stakingData = await response.json();
+        console.log("RESPONSE: ", stakingData);
+        console.log('✅ Primary source successful for staking data');
+
+        // Update stats
+        updateStats55();
+
+        // Convert users object to array for easier handling
+        filteredData = Object.entries(stakingData.users).map(([address, data]) => ({
+            address,
+            ...data
+        }));
+
+        // Initial render
+        currentPage = 1;
+        renderTable2();
+        renderPagination2();
+
+    } catch (primaryError) {
+        console.warn('⚠️ Primary source failed for staking data:', primaryError.message);
+        console.log('🔄 Falling back to GitHub backup for staking data...');
+
+        try {
+            document.getElementById('tableContent55').innerHTML = '<div class="loading55">Loading staking data from backup...</div>';
+
+            const backupResponse = await fetch(backupUrl);
+
+            if (!backupResponse.ok) {
+                throw new Error(`Backup source failed with status: ${backupResponse.status}`);
+            }
+
+            stakingData = await backupResponse.json();
+            console.log('✅ Backup source successful for staking data');
+            console.log("THIS THIS: ", stakingData);
+
+            // Update stats
+            updateStats55();
+
+            // Convert users object to array for easier handling
+            filteredData = Object.entries(stakingData.users).map(([address, data]) => ({
+                address,
+                ...data
+            }));
+
+            // Initial render
+            currentPage = 1;
+            renderTable2();
+            renderPagination2();
+
+            // Optional: Show user that backup data is being used
+            const tableHeader = document.querySelector('#tableContent55');
+            if (tableHeader) {
+                const backupNotice = document.createElement('div');
+                backupNotice.className = 'backup-notice';
+                backupNotice.style.cssText = 'background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 8px; margin-bottom: 10px; border-radius: 4px; font-size: 12px;';
+                backupNotice.innerHTML = '⚠️ Using backup data source - some data may be slightly delayed';
+                tableHeader.insertBefore(backupNotice, tableHeader.firstChild);
+            }
+
+        } catch (backupError) {
+            console.error('❌ Both primary and backup sources failed for staking data!');
+            console.error('Primary error:', primaryError.message);
+            console.error('Backup error:', backupError.message);
+
+            document.getElementById('tableContent55').innerHTML =
+                '<div class="error">Failed to load data from all sources. Please check your connection and try again.</div>';
+        }
+    }
+}
+
+/**
+ * Updates statistics for staking rich list
+ */
+function updateStats55() {
+    document.getElementById('lastBlock').textContent = stakingData.last_block;
+    document.getElementById('totalUsers').textContent = formatNumber(stakingData.user_addresses.length);
+
+    // Calculate totals
+    const users = Object.values(stakingData.users);
+    const totalB0xStaked = users.reduce((sum, user) => sum + user.B0xStaked, 0);
+    const total0xBTCStaked = users.reduce((sum, user) => sum + user['0xBTCStaked'], 0);
+
+    document.getElementById('totalB0xStaked').textContent = formatNumber(totalB0xStaked / 1e18);
+    document.getElementById('total0xBTCStaked').textContent = formatNumber(total0xBTCStaked / 1e8);
+}
+
+/**
+ * Loads B0x rich list data from primary or backup sources
+ * @async
+ */
+export async function loadData() {
+    const primaryUrls = {
+        base: customDataSource + 'RichList_B0x_mainnet.json',
+        eth: customDataSource + 'RichList__Mainnet_ETH_holders.json'
+    };
+
+    const backupUrls = {
+        base: customBACKUPDataSource + 'RichList_B0x_mainnet.json',
+        eth: customBACKUPDataSource + 'RichList__Mainnet_ETH_holders.json'
+    };
+
+    try {
+        console.log("Load data called");
+        document.getElementById('tableContent').innerHTML = '<div class="loading-rich">Loading rich list data...</div>';
+
+        console.log('Fetching rich list data from primary sources...');
+
+        // Try primary sources first
+        const [baseResponse, ethResponse] = await Promise.all([
+            fetch(primaryUrls.base),
+            fetch(primaryUrls.eth)
+        ]);
+
+        if (!baseResponse.ok || !ethResponse.ok) {
+            throw new Error(`Primary sources failed - Base: ${baseResponse.status}, ETH: ${ethResponse.status}`);
+        }
+
+        baseData = await baseResponse.json();
+        ethData = await ethResponse.json();
+
+        console.log('✅ Primary sources successful for rich list data');
+
+        combineData();
+        updateStats();
+        renderTable();
+
+    } catch (primaryError) {
+        console.warn('⚠️ Primary sources failed for rich list data:', primaryError.message);
+        console.log('🔄 Falling back to GitHub backup for rich list data...');
+
+        try {
+            document.getElementById('tableContent').innerHTML = '<div class="loading-rich">Loading rich list data from backup...</div>';
+
+            // Try backup sources
+            const [baseBackupResponse, ethBackupResponse] = await Promise.all([
+                fetch(backupUrls.base),
+                fetch(backupUrls.eth)
+            ]);
+
+            if (!baseBackupResponse.ok || !ethBackupResponse.ok) {
+                throw new Error(`Backup sources failed - Base: ${baseBackupResponse.status}, ETH: ${ethBackupResponse.status}`);
+            }
+
+            baseData = await baseBackupResponse.json();
+            ethData = await ethBackupResponse.json();
+
+            console.log('✅ Backup sources successful for rich list data');
+
+            combineData();
+            updateStats();
+            renderTable();
+
+            // Optional: Show user that backup data is being used
+            const tableContainer = document.querySelector('#tableContent');
+            if (tableContainer) {
+                const backupNotice = document.createElement('div');
+                backupNotice.className = 'backup-notice-rich';
+                backupNotice.style.cssText = 'background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 8px; margin-bottom: 10px; border-radius: 4px; font-size: 12px;';
+                backupNotice.innerHTML = '⚠️ Using backup data source - data may be slightly delayed';
+                tableContainer.insertBefore(backupNotice, tableContainer.firstChild);
+            }
+
+        } catch (backupError) {
+            console.error('❌ Both primary and backup sources failed for rich list data!');
+            console.error('Primary error:', primaryError.message);
+            console.error('Backup error:', backupError.message);
+
+            document.getElementById('tableContent').innerHTML = '<div class="error-rich">Error loading data from all sources. Please try again.</div>';
+        }
+    }
+}
+
+/**
+ * Combines Base and ETH rich list data
+ */
+function combineData() {
+    const addressMap = new Map();
+
+    // Process Base data
+    baseData.holders.forEach(holder => {
+        addressMap.set(holder.address, {
+            address: holder.address,
+            b0xBalance: parseFloat(holder.balanceFormatted) || 0,
+            b0xBalanceRaw: holder.balance,
+            ethB0xBalance: 0,
+            ethB0xBalanceRaw: '0'
+        });
+    });
+
+    // Process ETH data
+    ethData.holders.forEach(holder => {
+        const existing = addressMap.get(holder.address);
+        if (existing) {
+            existing.ethB0xBalance = parseFloat(holder.balanceFormatted) || 0;
+            existing.ethB0xBalanceRaw = holder.balance;
+        } else {
+            addressMap.set(holder.address, {
+                address: holder.address,
+                b0xBalance: 0,
+                b0xBalanceRaw: '0',
+                ethB0xBalance: parseFloat(holder.balanceFormatted) || 0,
+                ethB0xBalanceRaw: holder.balance
+            });
+        }
+    });
+
+    combinedData = Array.from(addressMap.values());
+
+    // Filter out addresses with zero balances for both tokens
+    combinedData = combinedData.filter(holder =>
+        holder.b0xBalance > 0 || holder.ethB0xBalance > 0
+    );
+
+    // Assign ranks AFTER filtering
+    assignRanks();
+    sortData();
+    filteredData2 = [...combinedData];
+}
+
+/**
+ * Assigns ranks for both Base and ETH B0x holdings
+ */
+function assignRanks() {
+    // Sort by Base B0x and assign ranks
+    const baseSort = [...combinedData].sort((a, b) => b.b0xBalance - a.b0xBalance);
+    baseSort.forEach((holder, index) => {
+        holder.rankBaseB0x = index + 1;
+    });
+
+    // Sort by ETH B0x and assign ranks
+    const ethSort = [...combinedData].sort((a, b) => b.ethB0xBalance - a.ethB0xBalance);
+    ethSort.forEach((holder, index) => {
+        holder.rankETHb0x = index + 1;
+    });
+}
+
+/**
+ * Sorts combined data based on current sort criteria
+ */
+function sortData() {
+    if (currentSort === 'b0x') {
+        sortByB0xBaseChain = true;
+        // Sort by Base B0x balance, highest first
+        combinedData.sort((a, b) => b.b0xBalance - a.b0xBalance);
+    } else {
+        sortByB0xBaseChain = false;
+        // Sort by ETH B0x balance, highest first
+        combinedData.sort((a, b) => b.ethB0xBalance - a.ethB0xBalance);
+    }
+}
+
+/**
+ * Updates statistics for B0x rich list
+ */
+function updateStats() {
+    // Implementation depends on what stats you want to display
+    console.log("Rich list stats updated");
 }
 
 // =============================================================================
@@ -1960,7 +2266,7 @@ export function calculateHashrate(timePerEpoch, miningDifficulty) {
  * Updates formattedHashrate export variable
  * @returns {Promise<number|null>} Calculated hashrate or null on error
  */
-export async function calculateAndDisplayHashrate() {
+export async function calculateAndDisplayHashrate(inflationMinedFromMulticall = null, miningDifficultyFromMulticall = null) {
     const currentTime = Date.now();
     const timeDiff = currentTime - prevTimeInFunc;
     console.log("prevHashrate:", prevHashrate);
@@ -1982,104 +2288,114 @@ export async function calculateAndDisplayHashrate() {
 
     try {
         await sleep(500);
-        console.log("Custom RPC:", customRPC);
 
-        const provider = new ethers.providers.JsonRpcProvider(customRPC);
+        let timePerEpoch, miningDifficulty;
 
-        // Define the two function signatures
-        const inflationMinedInterface = new ethers.utils.Interface([{
-            "inputs": [],
-            "name": "inflationMined",
-            "outputs": [
-                {"internalType": "uint256", "name": "YearlyInflation", "type": "uint256"},
-                {"internalType": "uint256", "name": "EpochsPerYear", "type": "uint256"},
-                {"internalType": "uint256", "name": "RewardsAtTime", "type": "uint256"},
-                {"internalType": "uint256", "name": "TimePerEpoch", "type": "uint256"}
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        }]);
+        // Use results from SUPER COMBINED MULTICALL if provided
+        if (inflationMinedFromMulticall && miningDifficultyFromMulticall) {
+            console.log("Using data from SUPER COMBINED MULTICALL (no separate RPC call needed)");
+            timePerEpoch = inflationMinedFromMulticall.TimePerEpoch;
+            miningDifficulty = miningDifficultyFromMulticall;
+        } else {
+            // Fallback: make our own multicall if data not provided
+            console.log("Custom RPC:", customRPC);
+            const provider = new ethers.providers.JsonRpcProvider(customRPC);
 
-        const getMiningDifficultyInterface = new ethers.utils.Interface([{
-            "inputs": [],
-            "name": "getMiningDifficulty",
-            "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-            "stateMutability": "view",
-            "type": "function"
-        }]);
+            // Define the two function signatures
+            const inflationMinedInterface = new ethers.utils.Interface([{
+                "inputs": [],
+                "name": "inflationMined",
+                "outputs": [
+                    {"internalType": "uint256", "name": "YearlyInflation", "type": "uint256"},
+                    {"internalType": "uint256", "name": "EpochsPerYear", "type": "uint256"},
+                    {"internalType": "uint256", "name": "RewardsAtTime", "type": "uint256"},
+                    {"internalType": "uint256", "name": "TimePerEpoch", "type": "uint256"}
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            }]);
 
-        // Multicall3 ABI
-        const multicall3ABI = [{
-            "inputs": [
+            const getMiningDifficultyInterface = new ethers.utils.Interface([{
+                "inputs": [],
+                "name": "getMiningDifficulty",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            }]);
+
+            // Multicall3 ABI
+            const multicall3ABI = [{
+                "inputs": [
+                    {
+                        "components": [
+                            {"internalType": "address", "name": "target", "type": "address"},
+                            {"internalType": "bool", "name": "allowFailure", "type": "bool"},
+                            {"internalType": "bytes", "name": "callData", "type": "bytes"}
+                        ],
+                        "internalType": "struct Multicall3.Call3[]",
+                        "name": "calls",
+                        "type": "tuple[]"
+                    }
+                ],
+                "name": "aggregate3",
+                "outputs": [
+                    {
+                        "components": [
+                            {"internalType": "bool", "name": "success", "type": "bool"},
+                            {"internalType": "bytes", "name": "returnData", "type": "bytes"}
+                        ],
+                        "internalType": "struct Multicall3.Result[]",
+                        "name": "returnData",
+                        "type": "tuple[]"
+                    }
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            }];
+
+            // Multicall3 contract address (same on most chains)
+            const multicall3Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
+
+            const multicall3Contract = new ethers.Contract(
+                multicall3Address,
+                multicall3ABI,
+                provider
+            );
+
+            // Encode the call data for both functions
+            const inflationMinedCallData = inflationMinedInterface.encodeFunctionData("inflationMined");
+            const getMiningDifficultyCallData = getMiningDifficultyInterface.encodeFunctionData("getMiningDifficulty");
+
+            // Prepare the calls array
+            const calls = [
                 {
-                    "components": [
-                        {"internalType": "address", "name": "target", "type": "address"},
-                        {"internalType": "bool", "name": "allowFailure", "type": "bool"},
-                        {"internalType": "bytes", "name": "callData", "type": "bytes"}
-                    ],
-                    "internalType": "struct Multicall3.Call3[]",
-                    "name": "calls",
-                    "type": "tuple[]"
-                }
-            ],
-            "name": "aggregate3",
-            "outputs": [
+                    target: ProofOfWorkAddresss,
+                    allowFailure: false,
+                    callData: inflationMinedCallData
+                },
                 {
-                    "components": [
-                        {"internalType": "bool", "name": "success", "type": "bool"},
-                        {"internalType": "bytes", "name": "returnData", "type": "bytes"}
-                    ],
-                    "internalType": "struct Multicall3.Result[]",
-                    "name": "returnData",
-                    "type": "tuple[]"
+                    target: ProofOfWorkAddresss,
+                    allowFailure: false,
+                    callData: getMiningDifficultyCallData
                 }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        }];
+            ];
 
-        // Multicall3 contract address (same on most chains)
-        const multicall3Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
+            // Execute multicall
+            const results = await multicall3Contract.aggregate3(calls);
 
-        const multicall3Contract = new ethers.Contract(
-            multicall3Address,
-            multicall3ABI,
-            provider
-        );
+            // Decode results
+            const inflationMinedResult = inflationMinedInterface.decodeFunctionResult(
+                "inflationMined",
+                results[0].returnData
+            );
+            const miningDifficultyResult = getMiningDifficultyInterface.decodeFunctionResult(
+                "getMiningDifficulty",
+                results[1].returnData
+            );
 
-        // Encode the call data for both functions
-        const inflationMinedCallData = inflationMinedInterface.encodeFunctionData("inflationMined");
-        const getMiningDifficultyCallData = getMiningDifficultyInterface.encodeFunctionData("getMiningDifficulty");
-
-        // Prepare the calls array
-        const calls = [
-            {
-                target: ProofOfWorkAddresss,
-                allowFailure: false,
-                callData: inflationMinedCallData
-            },
-            {
-                target: ProofOfWorkAddresss,
-                allowFailure: false,
-                callData: getMiningDifficultyCallData
-            }
-        ];
-
-        // Execute multicall
-        const results = await multicall3Contract.aggregate3(calls);
-
-        // Decode results
-        const inflationMinedResult = inflationMinedInterface.decodeFunctionResult(
-            "inflationMined",
-            results[0].returnData
-        );
-        const miningDifficultyResult = getMiningDifficultyInterface.decodeFunctionResult(
-            "getMiningDifficulty",
-            results[1].returnData
-        );
-
-        const timePerEpoch = inflationMinedResult[3];
-        const miningDifficulty = miningDifficultyResult[0];
+            timePerEpoch = inflationMinedResult[3];
+            miningDifficulty = miningDifficultyResult[0];
+        }
 
         console.log("TimePerEpoch:", timePerEpoch);
         console.log("getMiningDifficulty:", miningDifficulty);
@@ -2120,20 +2436,21 @@ export async function calculateAndDisplayHashrate() {
 // =============================================================================
 
 /**
- * Fetch price data from CoinGecko API
+ * Fetch price data from CoinGecko API with 5-minute cache
  * Updates global price variables
  * @returns {Promise<{wethPriceUSD: number, oxbtcPriceUSD: number}>}
  */
 export async function fetchPriceData() {
     try {
-        const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=weth,oxbitcoin&vs_currencies=usd');
-        const data = await response.json();
+        // Use cached price fetcher from utils.js
+        const { getCoinGeckoPrices } = await import('./utils.js');
+        const priceData = await getCoinGeckoPrices();
 
-        const wethPrice = data.weth.usd;
-        const oxbtcPrice = data['oxbitcoin'].usd;
+        const wethPrice = priceData.wethPriceUSD;
+        const oxbtcPrice = priceData.oxbtcPriceUSD;
 
-        console.log("Fetched WETH price USD:", wethPrice);
-        console.log("Fetched 0xBTC price USD:", oxbtcPrice);
+        console.log("WETH price USD:", wethPrice);
+        console.log("0xBTC price USD:", oxbtcPrice);
 
         // Update window variables for backwards compatibility
         window.wethPriceUSD = wethPrice;
@@ -2143,6 +2460,55 @@ export async function fetchPriceData() {
     } catch (error) {
         console.error("Error fetching CoinGecko prices:", error);
         return { wethPriceUSD: 3000, oxbtcPriceUSD: 0.0 };
+    }
+}
+
+/**
+ * Fetches token statistics (holders and transfers) from RichList JSON
+ * Uses primary URL with automatic fallback to backup URL
+ * @returns {Promise<{TokenHolders: number|string, Transfers: number|string}>}
+ */
+export async function getTokenStats() {
+    const primaryUrl = customDataSource + 'RichList_B0x_mainnet.json';
+    const backupUrl = customBACKUPDataSource + 'RichList_B0x_mainnet.json';
+
+    try {
+        let response;
+        try {
+            // Try primary URL first
+            response = await fetch(primaryUrl);
+            // If primary fails, try backup URL
+            if (!response.ok) {
+                console.warn('Primary URL failed, trying backup...');
+                response = await fetch(backupUrl);
+            }
+        } catch (error) {
+            console.log("First failed to fetch primaryUrl in getTokenStats going to backup url");
+            response = await fetch(backupUrl);
+        }
+
+        // If backup also fails, throw error
+        if (!response.ok) {
+            throw new Error('Both primary and backup URLs failed');
+        }
+
+        const data = await response.json();
+
+        const TokenHolders = data.totalHolders;
+        const Transfers = data.totalTransfers - data.totalMints;
+
+        return {
+            TokenHolders,
+            Transfers
+        };
+
+    } catch (error) {
+        console.error('Error fetching token stats from both URLs:', error);
+        // Fallback to error message if both URLs fail
+        return {
+            TokenHolders: "Unable To Load",
+            Transfers: "Unable To Load"
+        };
     }
 }
 
@@ -2382,8 +2748,9 @@ export async function getRewardEra(provider) {
 export async function getTokenHolders() {
     // TODO: Integrate with token holder API
     // This is a placeholder that should be replaced with actual API call
-    return 1000;
+    return await getTokenStats();
 }
+
 
 // Rate limiting for stats updates
 let lastStatsUpdate = 0;
@@ -2477,7 +2844,8 @@ export async function updateAllMiningStats(forceUpdate = false) {
             blocksToReadjust: parseInt(contractStats.blocksToReadjust),
             timeEmergency: parseInt(contractStats.secondsUntilSwitch),
             rewardEra: parseInt(contractStats.rewardEra),
-            tokenHolders: tokenHolders,
+            tokenHolders: tokenHolders.TokenHolders,
+            tokenTransfers: tokenHolders.Transfers,
             // Additional multicall data
             miningTarget: contractStats.miningTarget,
             tokensMinted: contractStats.tokensMinted,
@@ -2554,8 +2922,14 @@ export function updateMiningStatsDisplay(stats) {
 
         // Update token holders (if element exists)
         const holdersEl = document.querySelector('.stat-value-tokenHolders');
+        console.log("HOLDERS: ",stats.tokenHolders);
         if (holdersEl && stats.tokenHolders) {
-            holdersEl.textContent = stats.tokenHolders.toLocaleString();
+            holdersEl.textContent = stats.tokenHolders.toLocaleString() + " holders";
+        }
+        // Update token holders (if element exists)
+        const txsEl = document.querySelector('.stat-value-tokenTransfers');
+        if (txsEl && stats.tokenTransfers) {
+            txsEl.textContent = stats.tokenTransfers.toLocaleString() + " txs"
         }
 
         console.log('✓ Mining stats display updated');
@@ -2629,6 +3003,9 @@ export default {
 
     // Stats display
     updateStatsDisplay,
+    getTokenStats,
+    fetchPriceData,
+    calculateB0xPrice,
 
     // Formatting
     formatExactNumber,
@@ -2645,5 +3022,9 @@ export default {
     renderTable2,
     renderPagination2,
     renderTable,
-    renderPagination
+    renderPagination,
+
+    // Rich List Data Loading
+    loadData2,
+    loadData
 };

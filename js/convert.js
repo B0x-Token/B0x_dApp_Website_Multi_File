@@ -217,6 +217,8 @@ export async function depositFromV1toV2() {
 
     } catch (error) {
         console.error("Error in depositFromV1toV2:", error);
+          showInfoNotification('Error in DepsoitFromV1toV2: User Declined Tx or Too Many Tokens selected for convert' ,'Please try again and select below the available balance.');
+     
         return false;
     }
 }
@@ -290,6 +292,8 @@ export async function withdrawFromV2toV1() {
 
     } catch (error) {
         console.error("Error in withdrawFromV2toV1:", error);
+                  showInfoNotification('Error in withdrawFromV2toV1: User Declined Tx or Too Many Tokens selected for convert' ,'Please try again and Please select below the available balance.');
+
         return false;
     }
 }

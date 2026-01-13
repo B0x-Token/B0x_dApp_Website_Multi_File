@@ -11,10 +11,12 @@
  */
 
 // Import dependencies
-import { tokenAddresses, hookAddress } from './config.js';
+import { tokenAddresses, hookAddress, contractAddress_Swapper } from './config.js';
 import { connectWallet } from './wallet.js';
 import { positionData, stakingPositionData, updateTotalLiqIncrease } from './positions.js';
 import { updateTotalLiqIncreaseSTAKING } from './staking.js';
+import { customRPC } from './settings.js';
+import { getEstimate } from './swaps.js';
 
 // Create aliases for commonly used addresses
 const Address_ZEROXBTC_TESTNETCONTRACT = tokenAddresses['0xBTC'];
@@ -41,8 +43,212 @@ let isProgrammaticUpdate = false;
 let ratiozToSave = 0;
 
 // ============================================
+// PRICE RATIO STATE
+// ============================================
+
+// Helper function to create BigNumber from number or string
+const toBigNumber = (value) => {
+    if (typeof value === 'bigint') return value;
+    if (ethers.BigNumber.isBigNumber(value)) return value;
+    return ethers.BigNumber.from(value.toString());
+};
+
+// Global state for price ratios
+export let ratioz = toBigNumber(0);
+export let Current_getsqrtPricex96 = toBigNumber(0);
+export let readableAmountOut = '0';
+export let ratioAsWei = ethers.BigNumber.from(0);
+let firstRun = false;
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
+
+/**
+ * Fetches price ratio and sqrt price data using multicall
+ * Updates global ratioz and Current_getsqrtPricex96 values
+ * Triggers updates to estimate and ratio functions if values changed
+ * @param {string} nameOfFunction - Name of calling function for logging and control flow
+ * @returns {Promise<void>}
+ */
+export async function getSqrtRtAndPriceRatio(nameOfFunction) {
+    if (!window.walletConnected) {
+        await connectWallet();
+    }
+
+    const tokenSwapperABI = [
+        { "inputs": [{ "name": "token", "type": "address" }, { "name": "token2", "type": "address" }, { "name": "amountIn", "type": "uint256" }, { "name": "amountIn2", "type": "uint256" }, { "name": "currentx96", "type": "uint256" }, { "name": "slippage", "type": "uint256" }, { "name": "hookAddress", "type": "address" }, { "name": "toSendNFTto", "type": "address" }], "name": "createPositionWith2Tokens", "outputs": [{ "name": "", "type": "bool" }], "stateMutability": "payable", "type": "function" },
+        { "inputs": [{ "internalType": "address", "name": "token", "type": "address" }, { "internalType": "address", "name": "token2", "type": "address" }, { "internalType": "address", "name": "hookAddress", "type": "address" }], "name": "getsqrtPricex96", "outputs": [{ "internalType": "uint160", "name": "", "type": "uint160" }], "stateMutability": "view", "type": "function" },
+        {
+            "inputs": [
+                { "internalType": "address", "name": "token", "type": "address" },
+                { "internalType": "address", "name": "token2", "type": "address" },
+                { "internalType": "address", "name": "hookAddress", "type": "address" }
+            ],
+            "name": "getPriceRatio",
+            "outputs": [
+                { "internalType": "uint256", "name": "ratio", "type": "uint256" },
+                { "internalType": "address", "name": "token0z", "type": "address" },
+                { "internalType": "address", "name": "token1z", "type": "address" },
+                { "internalType": "uint8", "name": "token0decimals", "type": "uint8" },
+                { "internalType": "uint8", "name": "token1decimals", "type": "uint8" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ];
+
+    // MultiCall3 ABI (only aggregate3 function needed)
+    const multicall3ABI = [
+        {
+            "inputs": [
+                {
+                    "components": [
+                        { "internalType": "address", "name": "target", "type": "address" },
+                        { "internalType": "bool", "name": "allowFailure", "type": "bool" },
+                        { "internalType": "bytes", "name": "callData", "type": "bytes" }
+                    ],
+                    "internalType": "struct Multicall3.Call3[]",
+                    "name": "calls",
+                    "type": "tuple[]"
+                }
+            ],
+            "name": "aggregate3",
+            "outputs": [
+                {
+                    "components": [
+                        { "internalType": "bool", "name": "success", "type": "bool" },
+                        { "internalType": "bytes", "name": "returnData", "type": "bytes" }
+                    ],
+                    "internalType": "struct Multicall3.Result[]",
+                    "name": "returnData",
+                    "type": "tuple[]"
+                }
+            ],
+            "stateMutability": "payable",
+            "type": "function"
+        }
+    ];
+
+    // MultiCall3 is deployed at the same address on most chains
+    const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11";
+
+    console.log("Custom RPC4: ", customRPC);
+    const provider_zzzzz12 = new ethers.providers.JsonRpcProvider(customRPC);
+
+    // Create interface for encoding/decoding
+    const tokenSwapperInterface = new ethers.utils.Interface(tokenSwapperABI);
+
+    // Create MultiCall3 contract instance
+    const multicall3Contract = new ethers.Contract(
+        MULTICALL3_ADDRESS,
+        multicall3ABI,
+        provider_zzzzz12
+    );
+
+    let oldratioz = ratioz;
+    let oldsqrtPricex96 = Current_getsqrtPricex96;
+
+    try {
+        console.log("4444441111 tokenAddresses['B0x']", tokenAddresses['B0x']);
+        console.log("4444441111 Address_ZEROXBTC_TESTNETCONTRACT", Address_ZEROXBTC_TESTNETCONTRACT);
+        console.log("4444441111 hookAddress", hookAddress);
+
+        // Encode the function calls
+        const getPriceRatioCallData = tokenSwapperInterface.encodeFunctionData(
+            "getPriceRatio",
+            [tokenAddresses['B0x'], Address_ZEROXBTC_TESTNETCONTRACT, hookAddress]
+        );
+
+        const getSqrtPriceCallData = tokenSwapperInterface.encodeFunctionData(
+            "getsqrtPricex96",
+            [tokenAddresses['B0x'], Address_ZEROXBTC_TESTNETCONTRACT, hookAddress]
+        );
+
+        // Prepare MultiCall3 calls array
+        const calls = [
+            {
+                target: contractAddress_Swapper,
+                allowFailure: false, // Set to true if you want to continue even if this call fails
+                callData: getPriceRatioCallData
+            },
+            {
+                target: contractAddress_Swapper,
+                allowFailure: false,
+                callData: getSqrtPriceCallData
+            }
+        ];
+
+        // Execute batched call
+        const results = await multicall3Contract.callStatic.aggregate3(calls);
+
+        console.log("MultiCall3 results:", results);
+
+        // Decode first result (getPriceRatio)
+        if (results[0].success) {
+            const decodedPriceRatio = tokenSwapperInterface.decodeFunctionResult(
+                "getPriceRatio",
+                results[0].returnData
+            );
+
+            console.log("Raw getPriceRatio result:", decodedPriceRatio);
+            ratioz = decodedPriceRatio[0];
+            console.log(`Found valid Ratio x10**18: ${ratioz.toString()}`);
+
+            // Format to display as a readable number
+            readableAmountOut = ethers.utils.formatEther(ratioz);
+            ratioAsWei = ethers.utils.parseEther(readableAmountOut);
+            console.log(`Found valid Ratio x10**18: ${readableAmountOut} multiplier`);
+        } else {
+            console.error("getPriceRatio call failed");
+        }
+
+        // Decode second result (getsqrtPricex96)
+        if (results[1].success) {
+            const decodedSqrtPrice = tokenSwapperInterface.decodeFunctionResult(
+                "getsqrtPricex96",
+                results[1].returnData
+            );
+
+            console.log("Raw getsqrtPricex96 result:", decodedSqrtPrice);
+            Current_getsqrtPricex96 = decodedSqrtPrice[0];
+            console.log(`Found valid Current_getsqrtPricex96: ${Current_getsqrtPricex96.toString()}`);
+        } else {
+            console.error("getsqrtPricex96 call failed");
+        }
+
+    } catch (error) {
+        console.error(`Error in MultiCall3 aggregate3:`, error);
+    }
+
+    // Check for changes and trigger updates
+    if (!oldsqrtPricex96.eq(Current_getsqrtPricex96)) {
+        console.log("Calling oldsqrtPricex96 != Current_getsqrtPricex96 changed");
+    }
+    if (!oldratioz.eq(ratioz)) {
+        console.log("Calling oldratioz != ratioz changed");
+        console.log("Calling oldratioz:", oldratioz, " &&&&  ratioz:", ratioz);
+    }
+    if ((!oldsqrtPricex96.eq(Current_getsqrtPricex96) || !oldratioz.eq(ratioz)) && firstRun) {
+        console.log("Value changed calling getEstimate, getMaxCreate and getRatio");
+        console.log("Value changed and called from:", nameOfFunction);
+        if (nameOfFunction != "SwapFunction") {
+            await getEstimate();
+        }
+        await getRatioCreatePositiontokenA();
+        await getRatioIncreasePositiontokenA();
+        await getRatioStakeIncreasePositiontokenA();
+    }
+    oldsqrtPricex96 = Current_getsqrtPricex96;
+    oldratioz = ratioz;
+    firstRun = true;
+
+    // Also update window object for backwards compatibility
+    window.ratioz = ratioz;
+    window.Current_getsqrtPricex96 = Current_getsqrtPricex96;
+    window.readableAmountOut = readableAmountOut;
+    window.ratioAsWei = ratioAsWei;
+}
 
 /**
  * Throttled version of getSqrtRtAndPriceRatio
@@ -60,13 +266,8 @@ async function throttledGetSqrtRtAndPriceRatio(NameOfFunction = "General") {
 
     lastCallTime = now;
 
-    // Call the global function (needs to be available)
-    if (typeof window.getSqrtRtAndPriceRatio === 'function') {
-        return await window.getSqrtRtAndPriceRatio(NameOfFunction);
-    } else {
-        console.error('getSqrtRtAndPriceRatio function not available');
-        return null;
-    }
+    // Call the module function
+    return await getSqrtRtAndPriceRatio(NameOfFunction);
 }
 
 /**
@@ -117,6 +318,170 @@ function calculateOptimalAmountsWithTokenBPrioritySTAKESECTIONI(tokenAValue, tok
 }
 
 /**
+ * Calculate maximum amounts with proper limiting for position creation/increase
+ * Considers wallet balances and optional position unclaimed fees
+ * @param {string} tokenAValue - Token A symbol
+ * @param {string} tokenBValue - Token B symbol
+ * @param {Object} walletBalances - Wallet balances object
+ * @param {BigNumber} ratioz - Price ratio
+ * @param {string} requestedMaxToken - Which token to maximize ('0xBTC' or 'B0x')
+ * @param {Object} position - Optional position object with unclaimed fees
+ * @param {boolean} useFeesz - Whether to include unclaimed fees in calculation
+ * @returns {Object} Final amounts with limiting factor information
+ */
+export function getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, requestedMaxToken, position = null, useFeesz) {
+    // Calculate what the maximum possible amounts would be for each token (wallet + unclaimed fees)
+    let maxZeroxbtc, maxB0x;
+
+    if (position && position.tokenA == '0xBTC') {
+        // 0xBTC is tokenA, add unclaimedFeesTokenA
+        const walletAmount = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenA.toString(), 8);
+        maxZeroxbtc = walletAmount.add(unclaimedAmount);
+        if (!useFeesz) {
+            maxZeroxbtc = walletAmount;
+        }
+    } else if (position && position.tokenB == '0xBTC') {
+        // 0xBTC is tokenB, add unclaimedFeesTokenB
+        const walletAmount = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenB.toString(), 8);
+        maxZeroxbtc = walletAmount.add(unclaimedAmount);
+
+        if (!useFeesz) {
+            maxZeroxbtc = walletAmount;
+        }
+    } else {
+        // No position or 0xBTC not in position, use wallet only
+        maxZeroxbtc = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+    }
+
+    if (position && position.tokenA == 'B0x') {
+        // B0x is tokenA, add unclaimedFeesTokenA
+        const walletAmount = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenA.toString(), 18);
+        maxB0x = walletAmount.add(unclaimedAmount);
+
+        if (!useFeesz) {
+            maxB0x = walletAmount;
+        }
+    } else if (position && position.tokenB == 'B0x') {
+        // B0x is tokenB, add unclaimedFeesTokenB
+        const walletAmount = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenB.toString(), 18);
+        maxB0x = walletAmount.add(unclaimedAmount);
+
+        if (!useFeesz) {
+            maxB0x = walletAmount;
+        }
+    } else {
+        console.log("EUR EUR ");
+        // No position or B0x not in position, use wallet only
+        maxB0x = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+    }
+
+    const calculatedPriceRatio = BigInt(ratioz);
+
+    var b0xNeededForMax0xBTC = 0;
+    var zeroxbtcNeededForMaxB0x = 0;
+    var priceIn18Decimals = 0n;
+    if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) > BigInt(tokenAddresses['B0x'].toLowerCase())) {
+        // INVERTED: Use division instead of multiplication
+        priceIn18Decimals = (10n ** 36n) / (calculatedPriceRatio * (10n ** 10n)); // Invert the ratio
+        // Calculate scenarios
+        const amountZer0XIn18Decimals = BigInt(maxZeroxbtc) * 10n ** 10n;
+        b0xNeededForMax0xBTC = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+
+        // For 0xBTC needed from B0x, we divide by the inverted price
+        console.log("ffff this)");
+        zeroxbtcNeededForMaxB0x = (BigInt(maxB0x) * (10n ** 18n)) / priceIn18Decimals / (10n ** 10n);
+    } else {
+        // INVERTED: Use division instead of multiplication
+        priceIn18Decimals = calculatedPriceRatio / (10n ** 10n); // Convert 28 decimals to 18 decimals
+        // Calculate scenarios
+        const amountZer0XIn18Decimals = BigInt(maxZeroxbtc) * 10n ** 10n;
+        b0xNeededForMax0xBTC = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+
+        // For 0xBTC needed from B0x, we divide by the inverted price
+        zeroxbtcNeededForMaxB0x = (BigInt(maxB0x) * (10n ** 18n)) / priceIn18Decimals / (10n ** 10n);
+        console.log("ffff This this)");
+    }
+
+    console.log(`zzMax 0xBTC: ${ethers.utils.formatUnits(maxZeroxbtc, 8)}`);
+    console.log(`zzB0x needed for max 0xBTC: ${ethers.utils.formatEther(b0xNeededForMax0xBTC)}`);
+    console.log(`zzMax B0x: ${ethers.utils.formatEther(maxB0x)}`);
+    console.log(`zz0xBTC needed for max B0x: ${ethers.utils.formatUnits(zeroxbtcNeededForMaxB0x, 8)}`);
+    // Check which scenarios are feasible
+    const canMaxOut0xBTC = b0xNeededForMax0xBTC <= BigInt(maxB0x);
+    const canMaxOutB0x = zeroxbtcNeededForMaxB0x <= BigInt(maxZeroxbtc);
+    console.log("zzcanMaxOut0xBTC: ", canMaxOut0xBTC);
+    console.log("zzcanMaxOutB0x: ", canMaxOutB0x);
+
+    // Determine the actual amounts to use
+    let finalAmounts;
+
+    if (requestedMaxToken === '0xBTC' && canMaxOut0xBTC) {
+        // User wants max 0xBTC and it's possible
+        finalAmounts = {
+            amountWith8Decimals0xBTC: maxZeroxbtc,
+            amountToDeposit: b0xNeededForMax0xBTC,
+            actualLimitingFactor: 'none',
+            requestFulfilled: true
+        };
+    } else if (requestedMaxToken === 'B0x' && canMaxOutB0x) {
+        // User wants max B0x and it's possible
+        finalAmounts = {
+            amountWith8Decimals0xBTC: zeroxbtcNeededForMaxB0x,
+            amountToDeposit: maxB0x,
+            actualLimitingFactor: 'none',
+            requestFulfilled: true
+        };
+    } else {
+        // User's request can't be fulfilled, use the truly limiting factor
+        if (canMaxOut0xBTC && !canMaxOutB0x) {
+            finalAmounts = {
+                amountWith8Decimals0xBTC: maxZeroxbtc,
+                amountToDeposit: b0xNeededForMax0xBTC,
+                actualLimitingFactor: 'B0x',
+                requestFulfilled: false,
+                reason: `Cannot max out ${requestedMaxToken} because B0x is limiting`
+            };
+        } else if (!canMaxOut0xBTC && canMaxOutB0x) {
+            finalAmounts = {
+                amountWith8Decimals0xBTC: zeroxbtcNeededForMaxB0x,
+                amountToDeposit: maxB0x,
+                actualLimitingFactor: '0xBTC',
+                requestFulfilled: false,
+                reason: `Cannot max out ${requestedMaxToken} because 0xBTC is limiting`
+            };
+        } else {
+            // Neither can be maxed out independently, find the most limiting
+            const b0xRatio = parseFloat(maxB0x.toString()) / parseFloat(b0xNeededForMax0xBTC.toString());
+            const zeroxbtcRatio = parseFloat(maxZeroxbtc.toString()) / parseFloat(zeroxbtcNeededForMaxB0x.toString());
+
+            if (b0xRatio < zeroxbtcRatio) {
+                finalAmounts = {
+                    amountWith8Decimals0xBTC: zeroxbtcNeededForMaxB0x,
+                    amountToDeposit: maxB0x,
+                    actualLimitingFactor: 'B0x',
+                    requestFulfilled: requestedMaxToken === 'B0x',
+                    reason: 'B0x is the most limiting factor'
+                };
+            } else {
+                finalAmounts = {
+                    amountWith8Decimals0xBTC: maxZeroxbtc,
+                    amountToDeposit: b0xNeededForMax0xBTC,
+                    actualLimitingFactor: '0xBTC',
+                    requestFulfilled: requestedMaxToken === '0xBTC',
+                    reason: '0xBTC is the most limiting factor'
+                };
+            }
+        }
+    }
+
+    return finalAmounts;
+}
+
+/**
  * Handle max button click for regular increase section
  * @param {string} tokenSymbol - Token symbol
  * @param {HTMLElement} inputElement - Input element
@@ -138,14 +503,12 @@ function handleMaxButtonClick(tokenSymbol, inputElement) {
 
     const useFees = true;
 
-    // Call global function if available
-    if (typeof window.getMaxAmountsWithProperLimiting === 'function') {
-        const result = window.getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, tokenSymbol, position, useFees);
+    // Call the module function
+    const result = getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, tokenSymbol, position, useFees);
 
-        if (!result.requestFulfilled) {
-            console.log(`Max ${tokenSymbol} request could not be fulfilled: ${result.reason}`);
-            console.log(`Using max amounts based on actual limiting factor: ${result.actualLimitingFactor}`);
-        }
+    if (!result.requestFulfilled) {
+        console.log(`Max ${tokenSymbol} request could not be fulfilled: ${result.reason}`);
+        console.log(`Using max amounts based on actual limiting factor: ${result.actualLimitingFactor}`);
 
         const createInputs = document.querySelectorAll('#increase input[type="number"]');
         const amountInputA = createInputs[0];
@@ -191,37 +554,33 @@ function handleMaxButtonClickStakeIncrease(tokenSymbol, inputElement) {
 
     const useFees = true;
 
-    if (typeof window.getMaxAmountsWithProperLimiting === 'function') {
-        const result = window.getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, tokenSymbol, position, useFees);
+    // Call the module function
+    const result = getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, tokenSymbol, position, useFees);
 
-        if (!result.requestFulfilled) {
-            console.log(`Max ${tokenSymbol} request could not be fulfilled: ${result.reason}`);
-            console.log(`Using max amounts based on actual limiting factor: ${result.actualLimitingFactor}`);
-        }
-
-        const createInputs = document.querySelectorAll('#stake-increase input[type="number"]');
-        const amountInputA = createInputs[0];
-        const amountInputB = createInputs[1];
-
-        const tokenAinputAddress = tokenAddresses[tokenAValue];
-
-        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
-            amountInputA.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
-            amountInputB.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
-        } else {
-            amountInputA.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
-            amountInputB.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
-        }
-
-        if (typeof updateTotalLiqIncreaseSTAKING === 'function') {
-            updateTotalLiqIncreaseSTAKING();
-        }
-
-        return result;
+    if (!result.requestFulfilled) {
+        console.log(`Max ${tokenSymbol} request could not be fulfilled: ${result.reason}`);
+        console.log(`Using max amounts based on actual limiting factor: ${result.actualLimitingFactor}`);
     }
 
-    console.error('getMaxAmountsWithProperLimiting function not available');
-    return null;
+    const createInputs = document.querySelectorAll('#stake-increase input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    const tokenAinputAddress = tokenAddresses[tokenAValue];
+
+    if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+        amountInputA.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
+        amountInputB.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
+    } else {
+        amountInputA.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
+        amountInputB.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
+    }
+
+    if (typeof updateTotalLiqIncreaseSTAKING === 'function') {
+        updateTotalLiqIncreaseSTAKING();
+    }
+
+    return result;
 }
 
 // ============================================

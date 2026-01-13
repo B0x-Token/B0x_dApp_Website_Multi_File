@@ -668,6 +668,201 @@ async function getSingleRouteOutput(route, amount, contractInterface, fromToken,
 }
 
 // ============================================
+// COMBINED MULTICALL FOR ROUTE OPTIMIZATION
+// ============================================
+
+/**
+ * Get all route estimates and optimal splits in a single combined multicall
+ * Combines single route estimates and multi-route split optimization
+ * @param {Array} allRoutes - All possible routes
+ * @param {BigNumber} amountToSwap - Amount to swap
+ * @param {string} fromToken - Source token
+ * @param {string} toToken - Destination token
+ * @returns {Promise<{singleRouteEstimates: Array, multiRouteResult: Object}>}
+ */
+async function getCombinedRouteEstimates(allRoutes, amountToSwap, fromToken, toToken) {
+    console.log("Custom RPC (Combined): ", customRPC);
+    const provider_zzzzz12 = new ethers.providers.JsonRpcProvider(customRPC);
+    const provider_temp = window.walletConnected ? window.provider : provider_zzzzz12;
+    const contractInterface = new ethers.utils.Interface(SPLIT_ROUTE_ABI);
+    const multicallContract = new ethers.Contract(MULTICALL_ADDRESS, MULTICALL_ABI2, provider_temp);
+
+    const tokenInAddress = tokenAddresses[fromToken];
+    const tokenOutAddress = tokenAddresses[toToken];
+
+    // Part 1: Build calls for all single route estimates
+    const singleRouteCalls = allRoutes.map(route => ({
+        target: contractAddress_Swapper,
+        allowFailure: true,
+        callData: buildRouteCall(route, amountToSwap, contractInterface, tokenInAddress, tokenOutAddress)
+    }));
+
+    // Part 2: Build calls for multi-route split optimization (if 2+ routes)
+    let multiRouteCalls = [];
+    let multiRouteMetadata = [];
+    const maxRoutes = Math.min(allRoutes.length, 4);
+    const routes = allRoutes.slice(0, maxRoutes);
+
+    if (routes.length >= 2) {
+        // Generate test splits using ternary search approach
+        const allTestSplits = [];
+        let left = 0;
+        let right = 10000;
+
+        // Ternary search to find splits to test
+        while (right - left > 50) {
+            const mid1 = Math.floor(left + (right - left) / 3);
+            const mid2 = Math.floor(right - (right - left) / 3);
+
+            allTestSplits.push({
+                splits: [mid1, Math.floor((mid1 + mid2) / 2), mid2],
+                left,
+                right
+            });
+
+            const tempBestSplit = Math.floor((mid1 + mid2) / 2);
+            if (tempBestSplit === mid1) {
+                right = Math.floor((mid1 + mid2) / 2);
+            } else if (tempBestSplit === mid2) {
+                left = Math.floor((mid1 + mid2) / 2);
+            } else {
+                left = mid1;
+                right = mid2;
+            }
+        }
+
+        // Build calls for each test split
+        for (const iteration of allTestSplits) {
+            for (const split of iteration.splits) {
+                const amount1 = amountToSwap.mul(split).div(10000);
+                const amount2 = amountToSwap.sub(amount1);
+
+                const startIdx = multiRouteCalls.length;
+
+                multiRouteCalls.push({
+                    target: contractAddress_Swapper,
+                    allowFailure: false,
+                    callData: buildRouteCall(routes[0], amount1, contractInterface, tokenInAddress, tokenOutAddress)
+                });
+
+                multiRouteCalls.push({
+                    target: contractAddress_Swapper,
+                    allowFailure: false,
+                    callData: buildRouteCall(routes[1], amount2, contractInterface, tokenInAddress, tokenOutAddress)
+                });
+
+                multiRouteMetadata.push({
+                    split,
+                    resultIndices: [startIdx, startIdx + 1],
+                    amounts: [amount1, amount2]
+                });
+            }
+        }
+    }
+
+    // COMBINED MULTICALL: Execute all calls at once
+    const allCalls = [...singleRouteCalls, ...multiRouteCalls];
+    console.log(`Executing COMBINED MULTICALL with ${allCalls.length} calls (${singleRouteCalls.length} single route + ${multiRouteCalls.length} multi-route split tests)`);
+
+    const batchSize = 100; // Adjust based on RPC limits
+    const allResults = [];
+
+    for (let i = 0; i < allCalls.length; i += batchSize) {
+        const batch = allCalls.slice(i, Math.min(i + batchSize, allCalls.length));
+        try {
+            const results = await multicallContract.callStatic.aggregate3(batch);
+            allResults.push(...results);
+            await sleep(500);
+        } catch (error) {
+            console.error(`Batch ${Math.floor(i / batchSize)} error:`, error);
+            await sleep(2000);
+            // Fill with null results for failed batch
+            allResults.push(...batch.map(() => ({ success: false, returnData: '0x' })));
+        }
+    }
+
+    // Process single route estimates
+    const singleRouteEstimates = allRoutes.map((route, i) => {
+        const result = allResults[i];
+        if (!result || !result.success) {
+            console.error(`Route ${route.name} failed`);
+            return null;
+        }
+
+        try {
+            const decoded = contractInterface.decodeFunctionResult(
+                route.isSingleHop ? "getOutput" : "getOutputMultiHop",
+                result.returnData
+            );
+            return {
+                route: route,
+                output: decoded[0]
+            };
+        } catch (error) {
+            console.error(`Failed to decode route ${route.name}:`, error);
+            return null;
+        }
+    });
+
+    // Process multi-route results
+    let multiRouteResult = null;
+    if (routes.length >= 2 && multiRouteCalls.length > 0) {
+        const multiRouteResults = allResults.slice(singleRouteCalls.length);
+
+        let bestSplit = 5000;
+        let bestOutput = ethers.BigNumber.from(0);
+        let bestAmounts = null;
+        let bestOutputs = null;
+
+        for (let i = 0; i < multiRouteMetadata.length; i++) {
+            const metadata = multiRouteMetadata[i];
+            const result1 = multiRouteResults[metadata.resultIndices[0]];
+            const result2 = multiRouteResults[metadata.resultIndices[1]];
+
+            if (result1 && result1.success && result2 && result2.success) {
+                try {
+                    const output1 = contractInterface.decodeFunctionResult(
+                        routes[0].isSingleHop ? "getOutput" : "getOutputMultiHop",
+                        result1.returnData
+                    )[0];
+
+                    const output2 = contractInterface.decodeFunctionResult(
+                        routes[1].isSingleHop ? "getOutput" : "getOutputMultiHop",
+                        result2.returnData
+                    )[0];
+
+                    const totalOutput = output1.add(output2);
+
+                    if (totalOutput.gt(bestOutput)) {
+                        bestOutput = totalOutput;
+                        bestSplit = metadata.split;
+                        bestAmounts = metadata.amounts;
+                        bestOutputs = [output1, output2];
+                    }
+                } catch (error) {
+                    console.error(`Failed to decode split ${metadata.split}:`, error);
+                }
+            }
+        }
+
+        if (bestOutput.gt(0)) {
+            multiRouteResult = {
+                routes: routes.slice(0, 2),
+                splits: [bestSplit / 100, (10000 - bestSplit) / 100],
+                amounts: bestAmounts,
+                outputs: bestOutputs,
+                totalOutput: bestOutput
+            };
+        }
+    }
+
+    return {
+        singleRouteEstimates,
+        multiRouteResult
+    };
+}
+
+// ============================================
 // MULTI-ROUTE OPTIMIZATION
 // ============================================
 
@@ -1261,16 +1456,14 @@ export async function getEstimate() {
             window.lastEstimateType = 'single';
             window.lastSingleRoute = allRoutes[0];
         } else {
-            console.log(`${allRoutes.length} routes available - optimizing...`);
+            console.log(`${allRoutes.length} routes available - optimizing with COMBINED MULTICALL...`);
 
-            const singleRouteEstimates = await Promise.all(
-                allRoutes.map(route =>
-                    getSingleRouteEstimate(route, amountToSwap, fromToken, toToken)
-                        .catch(err => {
-                            console.error(`Route ${route.name} failed:`, err);
-                            return null;
-                        })
-                )
+            // Use combined multicall to get all estimates at once
+            const { singleRouteEstimates, multiRouteResult } = await getCombinedRouteEstimates(
+                allRoutes,
+                amountToSwap,
+                fromToken,
+                toToken
             );
 
             let bestSingleRoute = null;
@@ -1282,16 +1475,11 @@ export async function getEstimate() {
                 }
             }
 
-            const multiRouteResult = await calculateOptimalMultiRouteSplit(
-                fromToken,
-                toToken,
-                amountToSwap,
-                Math.min(allRoutes.length, 4)
-            );
-
-            console.log("multiRouteResult: ", multiRouteResult);
-            console.log("multiRouteResult: bestSingleOutput: ", bestSingleOutput.toString());
-            console.log("multiRouteResult: multiRouteResult.totalOutput: ", multiRouteResult.totalOutput.toString());
+            console.log("Best single route:", bestSingleRoute?.name);
+            console.log("Best single output:", bestSingleOutput.toString());
+            if (multiRouteResult) {
+                console.log("Multi-route result output:", multiRouteResult.totalOutput.toString());
+            }
 
             if (multiRouteResult && multiRouteResult.totalOutput.gt(bestSingleOutput)) {
                 const improvement = multiRouteResult.totalOutput.sub(bestSingleOutput)

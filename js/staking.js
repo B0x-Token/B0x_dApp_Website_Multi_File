@@ -17,7 +17,8 @@ import {
     positionManager_address,
     contractAddress_Swapper,
     hookAddress,
-    MULTICALL_ADDRESS
+    MULTICALL_ADDRESS,
+    ProofOfWorkAddresss
 } from './config.js';
 
 import { positionData, stakingPositionData } from './positions.js';
@@ -36,9 +37,10 @@ import {
 import {
     getTokenNameFromAddress,
     getSymbolFromAddress,
-    tokenAddressesDecimals
+    tokenAddressesDecimals,
+    getCoinGeckoPrices
 } from './utils.js';
-import { MULTICALL_ABI2 } from './abis.js';
+import { MULTICALL_ABI2, CONTRACT_ABI } from './abis.js';
 import {
     getSqrtRatioAtTick,
     approveTokensViaPermit2,
@@ -272,19 +274,30 @@ export function updateStakingValues(stakedAmounts, apy) {
 
     const element0 = document.getElementById('totalStaked0');
     if (element0) {
-        const tokenName = getTokenNameFromAddress(currency0);
-        element0.textContent = `${stakedAmounts[0] || '0'} ${tokenName}`;
+      
+
+        const amount0 = Number(stakedAmounts[0] || 0);
+const tokenName0 = getTokenNameFromAddress(currency0);
+
+element0.textContent = `${amount0.toFixed(2)} ${tokenName0}`;
+
     }
 
     const element1 = document.getElementById('totalStaked1');
     if (element1) {
-        const tokenName = getTokenNameFromAddress(currency1);
-        element1.textContent = `${stakedAmounts[1] || '0'} ${tokenName}`;
-    }
+
+        const amount1 = Number(stakedAmounts[1] || 0);
+const tokenName1 = getTokenNameFromAddress(currency1);
+
+element1.textContent = `${amount1.toFixed(2)} ${tokenName1}`;
+
+   }
 
     const apyElement = document.getElementById('APYPercentage');
     if (apyElement) {
-        apyElement.textContent = `${apy}%`;
+
+        console.log("WINDOW APY FINAL IS: 3! :",window.APYFINAL);
+        apyElement.textContent = `${window.APYFINAL.toFixed(2)}%`;
     }
 }
 
@@ -628,9 +641,10 @@ export async function withdrawNFTStake() {
  * @returns {Promise<number>} Calculated APY
  */
 
+        const amountToSwap = BigInt(10 ** 18);
     let amountOut_Saved = 0;
     let result = 0;
-export async function GetRewardAPY(_tokenAddresses, _rewardRate, zeroXBTC_In_Staking) {
+export async function GetRewardAPY(_tokenAddresses, _rewardRate, zeroXBTC_In_Staking, tokenSwapperResult = null) {
     let total_rewardRate_WETH = 0;
     let total_rewardRate_0xBTC = 0;
     let total_rewardRate_B0x = 0;
@@ -650,46 +664,10 @@ export async function GetRewardAPY(_tokenAddresses, _rewardRate, zeroXBTC_In_Sta
         }
     }
 
-    const tokenSwapperABI = [
-        {
-            "inputs": [
-                { "name": "tokenZeroxBTC", "type": "address" },
-                { "name": "tokenBZeroX", "type": "address" },
-                { "name": "tokenIn", "type": "address" },
-                { "name": "hookAddress", "type": "address" },
-                { "name": "amountIn", "type": "uint128" }
-            ],
-            "name": "getOutput",
-            "outputs": [{ "name": "amountOut", "type": "uint256" }],
-            "stateMutability": "view",
-            "type": "function"
-        }
-    ];
-
-    console.log("Custom RPC2: ", customRPC);
-    const provider_zzzzz12 = new ethers.providers.JsonRpcProvider(customRPC);
-    const tokenSwapperContract = new ethers.Contract(
-        contractAddress_Swapper,
-        tokenSwapperABI,
-        provider_zzzzz12
-    );
-
-    const tokenInputAddress = tokenAddresses['B0x'];
-    let amountToSwap = BigInt(10 ** 18);
-    if (lastWETHto0xBTCRateUpdate2 < Date.now() - 120000) {
-        try {
-            result = await tokenSwapperContract.callStatic.getOutput(
-                Address_ZEROXBTC_TESTNETCONTRACT,
-                tokenAddress,
-                tokenInputAddress,
-                HookAddress,
-                amountToSwap
-            );
-
-            lastWETHto0xBTCRateUpdate2 = Date.now();
-        } catch (error) {
-            console.error('Error calling getOutput in rewardAPY:', error);
-        }
+    // Use the tokenSwapper result from multicall if provided and timing allows
+    if (tokenSwapperResult && lastWETHto0xBTCRateUpdate2 < Date.now() - 120000) {
+        result = tokenSwapperResult;
+        lastWETHto0xBTCRateUpdate2 = Date.now();
 
         console.log("Raw result type:", typeof result);
 
@@ -718,26 +696,24 @@ export async function GetRewardAPY(_tokenAddresses, _rewardRate, zeroXBTC_In_Sta
     const total_rewardRate_B0x_proper = total_rewardRate_B0x / (10 ** 18);
     const total_rewardRate_B0x_0xBTC_Yearly = HowManySecondsINyear * total_rewardRate_B0x_proper * exchangeRate;
     console.log("total_rewardRate_B0x_0xBTC_Yearly: ", total_rewardRate_B0x_0xBTC_Yearly);
-
+console.log("total_rewardRate_B0x_0xBTC_Yearly: ",total_rewardRate_B0x_0xBTC_Yearly);
     const total_rewardRate_0xBTC_Yearly = HowManySecondsINyear * total_rewardRate_0xBTC / 10 ** 8;
     console.log("total_rewardRate_0xBTC_Yearly", total_rewardRate_0xBTC_Yearly);
 
-    // Fetch prices from CoinGecko
+    // Fetch prices from CoinGecko with 5-minute cache
     let wethPriceUSD = 0;
     let oxbtcPriceUSD = 0;
 
-    if (lastWETHto0xBTCRateUpdate < Date.now() - 120000) {
+    if (lastWETHto0xBTCRateUpdate < Date.now() - 300000) { // 5 minutes
         try {
-            const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=weth,oxbitcoin&vs_currencies=usd');
-            const data = await response.json();
-            console.log("Data", data);
-            wethPriceUSD = data.weth.usd;
-            oxbtcPriceUSD = data['oxbitcoin'].usd;
+            const priceData = await getCoinGeckoPrices();
+            wethPriceUSD = priceData.wethPriceUSD;
+            oxbtcPriceUSD = priceData.oxbtcPriceUSD;
 
             wethTo0xBTCRate = wethPriceUSD / oxbtcPriceUSD;
 
-            console.log("VennD WETH price USD: ", wethPriceUSD);
-            console.log("VennD 0xBTC price USD: ", oxbtcPriceUSD);
+            console.log("WETH price USD: ", wethPriceUSD);
+            console.log("0xBTC price USD: ", oxbtcPriceUSD);
             console.log("WETH to 0xBTC rate: ", wethTo0xBTCRate);
 
             lastWETHto0xBTCRateUpdate = Date.now();
@@ -777,6 +753,15 @@ export async function GetRewardAPY(_tokenAddresses, _rewardRate, zeroXBTC_In_Sta
  * @async
  * @returns {Promise<Object>} Reward statistics
  */
+
+const REWARD_STATS_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+
+window.rewardStatsCache = {
+    timestamp: 0,
+    data: null
+};
+
+
 export async function getRewardStats() {
     if (window.userAddress == "" || window.userAddress == null) {
         window.userAddress = "0x08e259639a4eFCA939E15871aCdCf1AfD3d0EAa9";
@@ -784,7 +769,18 @@ export async function getRewardStats() {
 
     console.log("USERADDzzzY: ", window.userAddress);
 
+
+    
     const now = Date.now();
+
+    if (
+        window.rewardStatsCache.data &&
+        (now - window.rewardStatsCache.timestamp) < REWARD_STATS_CACHE_TTL
+    ) {
+        console.log("Using cached reward stats (fresh)");
+        return window.rewardStatsCache.data;
+    }
+    
     if (now - lastRewardStatsCall < REWARD_STATS_COOLDOWN && first3 > 3) {
         console.log("getRewardStats called too soon, skipping...");
         return;
@@ -818,6 +814,12 @@ export async function getRewardStats() {
             "name": "returnData",
             "type": "tuple[]"
         }],
+        "stateMutability": "view",
+        "type": "function"
+    }, {
+        "inputs": [],
+        "name": "getBlockNumber",
+        "outputs": [{ "internalType": "uint256", "name": "blockNumber", "type": "uint256" }],
         "stateMutability": "view",
         "type": "function"
     }];
@@ -862,10 +864,30 @@ export async function getRewardStats() {
         "type": "function"
     }];
 
+    const tokenSwapperABI = [{
+        "inputs": [
+            { "name": "tokenZeroxBTC", "type": "address" },
+            { "name": "tokenBZeroX", "type": "address" },
+            { "name": "tokenIn", "type": "address" },
+            { "name": "hookAddress", "type": "address" },
+            { "name": "amountIn", "type": "uint128" }
+        ],
+        "name": "getOutput",
+        "outputs": [{ "name": "amountOut", "type": "uint256" }],
+        "stateMutability": "view",
+        "type": "function"
+    }];
+
     const iface = new ethers.utils.Interface(getRewardStatsABI);
+    const contractInterface = new ethers.utils.Interface(CONTRACT_ABI);
+    const tokenSwapperInterface = new ethers.utils.Interface(tokenSwapperABI);
+    const multicallInterface = new ethers.utils.Interface(MULTICALL3_ABI);
+
     console.log("userAddress== ", window.userAddress);
 
+    // SUPER COMBINED MULTICALL: Combines getRewardStats, GetContractStatsWithMultiCall, tokenSwapper.getOutput, and getBlockNumber
     const calls = [
+        // Calls 0-3: getRewardStats calls (4 calls)
         {
             target: contractAddressLPRewardsStaking,
             allowFailure: false,
@@ -885,18 +907,108 @@ export async function getRewardStats() {
             target: contractAddressLPRewardsStaking,
             allowFailure: false,
             callData: iface.encodeFunctionData("getContractTotals")
+        },
+        // Calls 4-15: GetContractStatsWithMultiCall calls (12 calls)
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("miningTarget", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("getMiningDifficulty", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("epochCount", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("inflationMined", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("blocksToReadjust", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("seconds_Until_adjustmentSwitch", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("latestDifficultyPeriodStarted", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("latestDifficultyPeriodStarted2", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("rewardEra", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("readjustsToWhatDifficulty", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("tokensMinted", []) },
+        { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("maxSupplyForEra", []) },
+        // Call 16: tokenSwapper.getOutput call (1 call)
+        {
+            target: contractAddress_Swapper,
+            allowFailure: false,
+            callData: tokenSwapperInterface.encodeFunctionData("getOutput", [
+                Address_ZEROXBTC_TESTNETCONTRACT,
+                tokenAddress,
+                tokenAddresses['B0x'],
+                HookAddress,
+                BigInt(10 ** 18)
+            ])
+        },
+        // Call 17: getBlockNumber call (1 call)
+        {
+            target: MULTICALL3_ADDRESS,
+            allowFailure: false,
+            callData: multicallInterface.encodeFunctionData("getBlockNumber", [])
         }
     ];
 
     console.log("Custom RPC2: ", customRPC);
     const provider_zzzzz12 = new ethers.providers.JsonRpcProvider(customRPC);
     const multicallContract = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider_zzzzz12);
+    console.log("Executing SUPER COMBINED MULTICALL with", calls.length, "function calls...");
     const results = await multicallContract.aggregate3(calls);
+    console.log("SUPER COMBINED MULTICALL executed successfully!");
 
+    // Decode getRewardStats results (indices 0-3)
     const resultDuration = iface.decodeFunctionResult("duration_of_rewards", results[0].returnData)[0];
     const result = iface.decodeFunctionResult("getRewardOwedStats", results[1].returnData);
     const result2 = iface.decodeFunctionResult("totalSupply", results[2].returnData)[0];
     const result3 = iface.decodeFunctionResult("getContractTotals", results[3].returnData);
+
+    // Decode GetContractStatsWithMultiCall results (indices 4-15)
+    const [
+        miningTarget,
+        miningDifficulty,
+        epochCount,
+        inflationMined,
+        blocksToReadjust,
+        secondsUntilSwitch,
+        latestDiffPeriod,
+        latestDiffPeriod2,
+        rewardEra,
+        readjustDifficulty,
+        tokensMinted,
+        maxSupplyForEra
+    ] = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((index) => {
+        const functionName = [
+            "miningTarget", "getMiningDifficulty", "epochCount", "inflationMined", "blocksToReadjust",
+            "seconds_Until_adjustmentSwitch", "latestDifficultyPeriodStarted",
+            "latestDifficultyPeriodStarted2", "rewardEra", "readjustsToWhatDifficulty",
+            "tokensMinted", "maxSupplyForEra"
+        ][index - 4];
+        return contractInterface.decodeFunctionResult(functionName, results[index].returnData);
+    });
+
+    // Store contract stats for global access (blockNumber comes from multicall index 17, decoded later)
+    window.cachedContractStats = {
+        blockNumber: null, // Will be set after decoding blockNumber from multicall
+        miningTarget: miningTarget[0].toString(),
+        miningDifficulty: miningDifficulty[0].toString(),
+        epochCount: epochCount[0].toString(),
+        inflationMined: {
+            yearlyInflation: inflationMined.YearlyInflation.toString(),
+            epochsPerYear: inflationMined.EpochsPerYear.toString(),
+            rewardsAtTime: inflationMined.RewardsAtTime.toString(),
+            timePerEpoch: inflationMined.TimePerEpoch.toString()
+        },
+        blocksToReadjust: blocksToReadjust[0].toString(),
+        secondsUntilSwitch: secondsUntilSwitch[0].toString(),
+        latestDiffPeriod: latestDiffPeriod[0].toString(),
+        latestDiffPeriod2: latestDiffPeriod2[0].toString(),
+        rewardEra: rewardEra[0].toString(),
+        readjustDifficulty: readjustDifficulty[0].toString(),
+        tokensMinted: tokensMinted[0].toString(),
+        maxSupplyForEra: maxSupplyForEra[0].toString()
+    };
+
+    // Decode tokenSwapper.getOutput result (index 16)
+    const tokenSwapperResult = tokenSwapperInterface.decodeFunctionResult("getOutput", results[16].returnData)[0];
+
+    // Decode getBlockNumber result (index 17)
+    const blockNumberFromMulticall = multicallInterface.decodeFunctionResult("getBlockNumber", results[17].returnData)[0];
+    console.log("Block number from multicall:", blockNumberFromMulticall.toString());
+
+    // Update cachedContractStats with the block number from multicall
+    window.cachedContractStats.blockNumber = blockNumberFromMulticall.toString();
 
     const rewardAddressesStaking = result[0];
     const rewardsOwed = result[1];
@@ -1015,6 +1127,7 @@ export async function getRewardStats() {
         });
     }
 
+    
     totalLiquidityInStakingContract = result3[0];
     const total0xBTCinContract = result3[1];
     const totalB0xinContract = result3[2];
@@ -1022,10 +1135,40 @@ export async function getRewardStats() {
     console.log("totalLiquidityInStakingContract: ", totalLiquidityInStakingContract.toString());
     populateStakingManagementData();
 
-    await GetRewardAPY(rewardAddressesStaking, rewardtokenRewardRate, total0xBTCinContract);
+    await GetRewardAPY(rewardAddressesStaking, rewardtokenRewardRate, total0xBTCinContract, tokenSwapperResult);
 
-    if (window.calculateAndDisplayHashrate) await window.calculateAndDisplayHashrate();
+    // Pass inflationMined and miningDifficulty from SUPER COMBINED MULTICALL to avoid extra RPC call
+    if (window.calculateAndDisplayHashrate) {
+        await window.calculateAndDisplayHashrate(inflationMined, miningDifficulty[0]);
+    }
     if (window.updateWidget) await window.updateWidget();
+
+
+    
+    const finalResult = {
+        rewardAddressesStaking,
+        rewardsOwed,
+        rewardtokenSymbols,
+        rewardtokenNames,
+        rewardtokenDecimals,
+        rewardtokenRewardRate,
+        rewardtokenPeriodEndsAt,
+        contractTotals: {
+            totalLiquidityInStakingContract,
+            total0xBTCinContract,
+            totalB0xinContract
+        },
+        cachedContractStats: window.cachedContractStats,
+        tokenSwapperResult: tokenSwapperResult.toString(),
+        timestamp: Date.now()
+    };
+
+    window.rewardStatsCache = {
+        timestamp: Date.now(),
+        data: finalResult
+    };
+
+    
 }
 
 // ============================================

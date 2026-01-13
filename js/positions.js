@@ -22,7 +22,8 @@ import { showSuccessNotification, showErrorNotification, showInfoNotification, h
 import { POSITION_FINDER_ABI } from './abis.js';
 import { getSqrtRatioAtTick, approveTokensViaPermit2, toBigNumber } from './contracts.js';
 import { getSymbolFromAddress, tokenAddressesDecimals, fetchBalances } from './utils.js';
-import {getNFTOwners} from './data-loader.js';
+import { getNFTOwners } from './data-loader.js';
+import { updateStakingValues } from './staking.js';
 // ============================================
 // STATE VARIABLES
 // ============================================
@@ -30,6 +31,14 @@ import {getNFTOwners} from './data-loader.js';
 export let positionData = {};
 export let stakingPositionData = {};
 export let userSelectedPosition = null;
+
+// Store total staked amounts globally for display updates
+export let totalStakedAmounts = {
+    token0: '0',
+    token1: '0',
+    token0Symbol: '',
+    token1Symbol: ''
+};
 
 // Position selection tracking variables
 let userManualSelection = null;
@@ -289,6 +298,27 @@ async function approveIfNeeded(tokenToApprove, spenderAddress, requiredAmount) {
         console.log("Approval successful");
     } else {
         console.log("Sufficient allowance already exists");
+    }
+}
+
+// ============================================
+// STAKING VALUES UPDATE
+// ============================================
+
+/**
+ * Updates staking values display from stored amounts
+ * Called when switching to staking tab to refresh display
+ */
+export function updateStakingValuesFromStored() {
+    console.log("Updating staking values from stored amounts");
+
+    // Check if we have stored amounts
+    if (totalStakedAmounts.token0 && totalStakedAmounts.token1) {
+        const apy = (window.APYFINAL || 0).toFixed(2);
+        updateStakingValues([totalStakedAmounts.token0, totalStakedAmounts.token1], apy);
+        console.log("Updated with:", totalStakedAmounts.token0, totalStakedAmounts.token1, "APY:", apy);
+    } else {
+        console.log("No stored staking amounts available yet");
     }
 }
 
@@ -758,6 +788,39 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
     }
 
     await loadPositionsIntoDappSelections();
+
+    // Update staking values display with total staked amounts
+    console.log("RUNNING updateStakingValues");
+    if (PoolKeyCurrency0.length > 0 && PoolKeyCurrency1.length > 0) {
+        const tokenASymbol = getSymbolFromAddress(PoolKeyCurrency0[0]);
+        const decimalsTokenA = tokenAddressesDecimals[tokenASymbol];
+        const tokenBSymbol = getSymbolFromAddress(PoolKeyCurrency1[0]);
+        const decimalsTokenB = tokenAddressesDecimals[tokenBSymbol];
+
+        // Format the BigNumbers to human-readable units
+        const formattedTokenA = ethers.utils.formatUnits(totalStakedToken0, decimalsTokenA);
+        const formattedTokenB = ethers.utils.formatUnits(totalStakedToken1, decimalsTokenB);
+
+        // Apply toFixed for consistent decimal places
+        const formattedTokenAWithDecimals = parseFloat(formattedTokenA).toFixed(6);
+        const formattedTokenBWithDecimals = parseFloat(formattedTokenB).toFixed(6);
+
+        // Store globally for tab switching
+        totalStakedAmounts.token0 = formattedTokenAWithDecimals;
+        totalStakedAmounts.token1 = formattedTokenBWithDecimals;
+        totalStakedAmounts.token0Symbol = tokenASymbol;
+        totalStakedAmounts.token1Symbol = tokenBSymbol;
+
+        const apy = (window.APYFINAL || 0).toFixed(2);
+
+        // Update the staking values in the UI
+        updateStakingValues([formattedTokenAWithDecimals, formattedTokenBWithDecimals], apy);
+    }else{
+        const apy = (window.APYFINAL || 0).toFixed(2);
+                updateStakingValues([0, 0], apy);
+
+    }
+
     hideLoadingWidget();
 }
 

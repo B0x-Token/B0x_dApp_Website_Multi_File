@@ -41,6 +41,7 @@ import * as Convert from './convert.js';  // NEW: Convert functionality
 import * as MinerInfo from './miner-info.js';  // NEW: Mining stats and rich lists
 import * as Admin from './admin.js';
 import * as Init from './init.js';
+import * as Whitepaper from './whitepaper.js';  // NEW: Whitepaper page functionality
 
 // ============================================
 // EXPOSE MODULES GLOBALLY
@@ -65,6 +66,7 @@ window.Convert = Convert;
 window.MinerInfo = MinerInfo;
 window.Admin = Admin;
 window.Init = Init;
+window.Whitepaper = Whitepaper;
 
 // ============================================
 // EXPOSE KEY CONFIGURATION VARIABLES
@@ -249,6 +251,7 @@ Object.defineProperty(window, 'formattedHashrate', {
 // Price and stats functions
 window.fetchPriceData = UI.fetchPriceData;
 window.calculateB0xPrice = UI.calculateB0xPrice;
+window.getTokenStats = UI.getTokenStats;
 window.getTarget = UI.getTarget;
 window.getDifficulty = UI.getDifficulty;
 window.getEpochCount = UI.getEpochCount;
@@ -274,7 +277,22 @@ window.getMinerNameLinkHTML = MinerInfo.getMinerNameLinkHTML;
 window.getMinerAddressFromTopic = MinerInfo.getMinerAddressFromTopic;
 window.convertHashRateToReadable2 = MinerInfo.convertHashRateToReadable2;
 window.pool_colors = MinerInfo.pool_colors;
+
+// Rich list data loading
+window.loadData2 = UI.loadData2;
+window.loadData = UI.loadData;
+window.renderTable2 = UI.renderTable2;
+window.renderPagination2 = UI.renderPagination2;
+window.renderTable = UI.renderTable;
+window.renderPagination = UI.renderPagination;
 window.known_miners = MinerInfo.known_miners;
+
+// Whitepaper page functions
+window.initWhitepaper = Whitepaper.initWhitepaper;
+window.initScrollProgress = Whitepaper.initScrollProgress;
+window.initFadeInAnimations = Whitepaper.initFadeInAnimations;
+window.initSmoothScrolling = Whitepaper.initSmoothScrolling;
+window.initFeatureCardHoverEffects = Whitepaper.initFeatureCardHoverEffects;
 
 // Price variables are now set directly on window object in ui.js
 // No need for property descriptors since they're native window properties
@@ -407,6 +425,7 @@ window.populateStakingManagementData = Staking.populateStakingManagementData;
 
 // Positions module
 window.getTokenIDsOwnedByMetamask = Positions.getTokenIDsOwnedByMetamask;
+window.updateStakingValuesFromStored = Positions.updateStakingValuesFromStored;
 window.getAllPositionsData = Positions.getAllPositionsData;
 window.increaseLiquidity = Positions.increaseLiquidity;
 window.decreaseLiquidity = Positions.decreaseLiquidity;
@@ -415,6 +434,14 @@ window.updateTotalLiqIncrease = Positions.updateTotalLiqIncrease;
 window.updateDecreasePositionInfo = Positions.updateDecreasePositionInfo;
 window.updatePercentage = Positions.updatePercentage;
 window.loadPositionsIntoDappSelections = Positions.loadPositionsIntoDappSelections;
+
+// Positions Ratio module
+window.getSqrtRtAndPriceRatio = PositionsRatio.getSqrtRtAndPriceRatio;
+window.getMaxAmountsWithProperLimiting = PositionsRatio.getMaxAmountsWithProperLimiting;
+window.ratioz = PositionsRatio.ratioz;
+window.Current_getsqrtPricex96 = PositionsRatio.Current_getsqrtPricex96;
+window.readableAmountOut = PositionsRatio.readableAmountOut;
+window.ratioAsWei = PositionsRatio.ratioAsWei;
 
 // Swaps module
 window.getEstimate = Swaps.getEstimate;
@@ -512,9 +539,12 @@ window.initializeTabFromURL = Init.initializeTabFromURL;
 console.log('✅ All modules loaded successfully');
 console.log('📦 Modules available:', Object.keys({
     Config, Utils, UI, Wallet, Charts, ABIs, Settings,
-    Contracts, DataLoader, Staking, Positions, Swaps, Convert, Admin, Init
+    Contracts, DataLoader, Staking, Positions, Swaps, Convert, Admin, Init, Whitepaper
 }));
 console.log('🚀 B0x DApp ready for initialization');
+
+// Initialize whitepaper page functionality
+Whitepaper.initWhitepaper();
 
 // Export for ES6 module usage
 export {
@@ -529,8 +559,10 @@ export {
     DataLoader,
     Staking,
     Positions,
+    PositionsRatio,
     Swaps,
     Convert,
     Admin,
-    Init
+    Init,
+    Whitepaper
 };

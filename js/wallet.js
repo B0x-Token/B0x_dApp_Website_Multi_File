@@ -9,7 +9,8 @@ import {
     defaultRPC_Base,
     defaultRPC_ETH,
 } from './config.js';
-
+import {totalStakedAmounts} from './positions.js';
+import {updateStakingValues} from './staking.js';
 import { showErrorNotification } from './ui.js';
 
 // ============================================================================
@@ -415,7 +416,7 @@ export async function connectWallet(resumeFromStep = null) {
         if (!resumeFromStep || resumeFromStep === 'getAPY') {
             await sleep(300);
             if (window.GetRewardAPY) {
-                await withNetworkRetry(() => window.GetRewardAPY(), 3, 'getAPY');
+              //  await withNetworkRetry(() => window.GetRewardAPY(), 3, 'getAPY');
             }
         }
 
@@ -688,10 +689,17 @@ export async function setupWalletListeners() {
 
             updateWalletUI(userAddress, true);
 
+
+
+
             // Call connect2 if available on window
             if (window.connect2) {
                 await window.connect2();
             }
+
+                updateStakingValues([totalStakedAmounts.token0, totalStakedAmounts.token1], window.APYFINAL);
+
+
         }
     });
 
