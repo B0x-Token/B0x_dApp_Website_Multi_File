@@ -1,0 +1,1311 @@
+/**
+ * @module data-loader
+ * @description RPC queries and blockchain data fetching
+ *
+ * This module handles:
+ * - Contract statistics fetching via multicall
+ * - Blockchain event monitoring
+ * - Position data loading from remote sources
+ * - Real-time blockchain scanning
+ * - Log processing and position validation
+ * - Continuous monitoring with automatic retry logic
+ *
+ * Main Functions:
+ * - mainRPCStarterForPositions() - Entry point for position monitoring
+ * - GetContractStatsWithMultiCall() - Fetch contract statistics
+ * - runContinuous() - Start continuous blockchain monitoring
+ * - runOnce() - Run a single scan cycle
+ * - stopMonitoring() - Stop continuous monitoring
+ *
+ * RPC Functions:
+ * - makeRpcCall() - Core RPC call wrapper with rate limiting
+ * - retryWithBackoff() - Retry logic with exponential backoff
+ * - getLogs() - Event log fetching
+ * - callContract() - Contract method calls
+ * - getLatestBlock() - Get latest block number
+ *
+ * Position Functions:
+ * - getPoolAndPositionInfo() - Get single position details
+ * - multicallGetPoolAndPositionInfo() - Batch position fetch via multicall
+ * - validatePositions() - Validate positions in batches
+ * - validatePositionsFullMulticall() - Validate all positions in single multicall
+ *
+ * Log Processing:
+ * - processMintTransferLogs() - Parse mint events from Transfer logs
+ * - processTransferLogs() - Parse regular Transfer events
+ *
+ * Block Scanning:
+ * - scanBlocks() - Scan block range for events
+ * - calculateBlockRanges() - Split block ranges for efficient scanning
+ *
+ * Utility Functions:
+ * - poolKeyMatches() - Compare pool keys
+ * - printSummary() - Print monitoring summary
+ * - sleep() - Async delay helper
+ * - exponentialBackoffDelay() - Calculate backoff delay
+ * - isRateLimitError() - Check for rate limit errors
+ * - saveDataLocally() - Save data to localStorage
+ * - loadDataLocally() - Load data from localStorage
+ */
+
+// Import dependencies
+import { MULTICALL_ABI, MULTICALL_ABI_PAYABLE, CONTRACT_ABI } from './abis.js';
+import { ProofOfWorkAddresss, MULTICALL_ADDRESS } from './config.js';
+import { CONFIG, customRPC, customDataSource, loadSettings } from './settings.js';
+import { showLoadingWidget, hideLoadingWidget, updateLoadingStatus, updateLoadingStatusWidget, setLoadingProgress } from './ui.js';
+
+// ============================================
+// STATE VARIABLES
+// ============================================
+
+/**
+ * NFT owners mapping (tokenId -> owner address)
+ * @type {Object}
+ */
+let nftOwners = {};
+
+/**
+ * Valid positions array
+ * @type {Array}
+ */
+let validPositions = [];
+
+/**
+ * Invalid positions array
+ * @type {Array}
+ */
+let invalidPositions = [];
+
+/**
+ * Current block number being scanned
+ * @type {number}
+ */
+let currentBlockzzzz = 0;
+
+/**
+ * Flag indicating if monitoring is running
+ * @type {boolean}
+ */
+let isRunning = false;
+
+/**
+ * Flag to force refresh
+ * @type {boolean}
+ */
+let forceRefresh = false;
+
+/**
+ * Flag indicating if log search is in progress
+ * @type {boolean}
+ */
+let WeAreSearchingLogsRightNow = false;
+
+/**
+ * Flag indicating if latest search is complete
+ * @type {boolean}
+ */
+let latestSearch = false;
+
+// ============================================
+// GETTERS (for external access to state)
+// ============================================
+
+export function getNFTOwners() { return nftOwners; }
+export function getValidPositions() { return validPositions; }
+export function getInvalidPositions() { return invalidPositions; }
+export function getCurrentBlock() { return currentBlockzzzz; }
+export function isMonitoringRunning() { return isRunning; }
+export function isLatestSearchComplete() { return latestSearch; }
+
+// ============================================
+// SETTERS
+// ============================================
+
+export function setNFTOwners(value) { nftOwners = value; }
+export function setValidPositions(value) { validPositions = value; }
+export function setCurrentBlock(value) { currentBlockzzzz = value; }
+export function setIsRunning(value) { isRunning = value; }
+export function setLatestSearchComplete(value) { latestSearch = value; }
+export function triggerRefresh() { forceRefresh = true; }
+
+// ============================================
+// CONTRACT STATS FETCHING
+// ============================================
+
+/**
+ * Fetches contract statistics using multicall for efficiency
+ * Gets mining stats, difficulty, rewards, etc. in a single call
+ * @async
+ * @returns {Promise<Object>} Contract statistics object
+ */
+export async function GetContractStatsWithMultiCall() {
+    // Connect if not already connected
+    if (!window.walletConnected) {
+        if (window.connectTempRPCforStats) {
+            await window.connectTempRPCforStats();
+        }
+    }
+
+    var provids = window.walletConnected ? window.provider : window.providerTempStats;
+    if (!window.walletConnected) {
+        provids = new ethers.providers.JsonRpcProvider(customRPC);
+    }
+    console.log("Contract stats fetch - connection ready");
+
+    try {
+        const contractInterface = new ethers.utils.Interface(CONTRACT_ABI);
+        const multicallContract = new ethers.Contract(MULTICALL_ADDRESS, MULTICALL_ABI, provids);
+
+        // Prepare multicall requests
+        const calls3 = [
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("miningTarget", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("getMiningDifficulty", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("epochCount", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("inflationMined", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("blocksToReadjust", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("seconds_Until_adjustmentSwitch", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("latestDifficultyPeriodStarted", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("latestDifficultyPeriodStarted2", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("rewardEra", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("readjustsToWhatDifficulty", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("tokensMinted", []) },
+            { target: ProofOfWorkAddresss, allowFailure: false, callData: contractInterface.encodeFunctionData("maxSupplyForEra", []) }
+        ];
+
+        let blockNumber, returnData;
+
+        try {
+            // Try aggregate3 first (more robust)
+            console.log("Executing aggregate3 multicall with", calls3.length, "function calls...");
+            const results = await multicallContract.aggregate3(calls3);
+            blockNumber = await provids.getBlockNumber();
+            returnData = results.map(result => {
+                if (!result.success) {
+                    throw new Error("One of the multicall functions failed");
+                }
+                return result.returnData;
+            });
+            console.log("Multicall executed successfully at block:", blockNumber.toString());
+        } catch (aggregate3Error) {
+            console.log("Aggregate3 failed, trying regular aggregate...", aggregate3Error.message);
+
+            // Fallback to regular aggregate
+            const calls = calls3.map(call => ({ target: call.target, callData: call.callData }));
+            const result = await multicallContract.aggregate(calls);
+            blockNumber = result.blockNumber;
+            returnData = result.returnData;
+        }
+
+        // Decode results
+        const [
+            miningTarget,
+            miningDifficulty,
+            epochCount,
+            inflationMined,
+            blocksToReadjust,
+            secondsUntilSwitch,
+            latestDiffPeriod,
+            latestDiffPeriod2,
+            rewardEra,
+            readjustDifficulty,
+            tokensMinted,
+            maxSupplyForEra
+        ] = returnData.map((data, index) => {
+            const functionName = [
+                "miningTarget", "getMiningDifficulty", "epochCount", "inflationMined", "blocksToReadjust",
+                "seconds_Until_adjustmentSwitch", "latestDifficultyPeriodStarted",
+                "latestDifficultyPeriodStarted2", "rewardEra", "readjustsToWhatDifficulty",
+                "tokensMinted", "maxSupplyForEra"
+            ][index];
+
+            return contractInterface.decodeFunctionResult(functionName, data);
+        });
+
+        // Return formatted stats
+        return {
+            blockNumber: blockNumber.toString(),
+            miningTarget: miningTarget[0].toString(),
+            miningDifficulty: miningDifficulty[0].toString(),
+            epochCount: epochCount[0].toString(),
+            inflationMined: {
+                yearlyInflation: inflationMined.YearlyInflation.toString(),
+                epochsPerYear: inflationMined.EpochsPerYear.toString(),
+                rewardsAtTime: inflationMined.RewardsAtTime.toString(),
+                timePerEpoch: inflationMined.TimePerEpoch.toString()
+            },
+            blocksToReadjust: blocksToReadjust[0].toString(),
+            secondsUntilSwitch: secondsUntilSwitch[0].toString(),
+            latestDiffPeriod: latestDiffPeriod[0].toString(),
+            latestDiffPeriod2: latestDiffPeriod2[0].toString(),
+            rewardEra: rewardEra[0].toString(),
+            readjustDifficulty: readjustDifficulty[0].toString(),
+            tokensMinted: tokensMinted[0].toString(),
+            maxSupplyForEra: maxSupplyForEra[0].toString()
+        };
+
+    } catch (error) {
+        console.error("Error in GetContractStatsWithMultiCall:", error);
+        throw error;
+    }
+}
+
+// ============================================
+// DATA FETCHING FROM REMOTE SOURCES
+// ============================================
+
+/**
+ * Fetches position data from remote URL
+ * Loads pre-computed position data to reduce RPC load
+ * @async
+ * @returns {Promise<void>}
+ */
+export async function fetchDataFromUrl() {
+    console.log("Fetching data from URL:", CONFIG.DATA_URL);
+
+    try {
+        const response = await fetch(CONFIG.DATA_URL);
+
+        if (!response.ok) {
+            console.warn(`Failed to fetch from primary source: ${response.status}`);
+            return;
+        }
+
+        const data = await response.json();
+        console.log("DATA DATA: ",data);
+        console.log("Data fetched successfully:", {
+            owners: Object.keys(data.nft_owners || {}).length,
+            positions: (data.valid_positions || []).length,
+            block: data.metadata.current_block || 'unknown'
+        });
+
+        // Update state with fetched data
+        if (data.nft_owners) nftOwners = data.nft_owners;
+        if (data.valid_positions) validPositions = data.valid_positions;
+        if (data.metadata.current_block) currentBlockzzzz = data.metadata.current_block;
+
+    } catch (error) {
+        console.error("Error fetching data from URL:", error);
+        console.log("Continuing without pre-loaded data...");
+    }
+}
+
+// ============================================
+// MAIN ENTRY POINT
+// ============================================
+
+/**
+ * Main entry point for position monitoring
+ * Initializes the Uniswap V4 position tracker
+ * @async
+ * @returns {Promise<Object>} Final NFT owners and valid positions
+ */
+export async function mainRPCStarterForPositions() {
+    console.log("Initializing Uniswap V4 Monitor...");
+
+    // Load settings first
+    await loadSettings();
+    CONFIG.RPC_URL = customRPC;
+    CONFIG.DATA_URL = customDataSource + "mainnet_uniswap_v4_data.json";
+
+    // Set additional CONFIG properties for RPC monitoring
+    CONFIG.START_BLOCK = CONFIG.START_BLOCK || 35937447;
+    CONFIG.MAX_LOGS_PER_REQUEST = CONFIG.MAX_LOGS_PER_REQUEST || 499;
+    CONFIG.MAX_BLOCKS_PER_REQUEST = CONFIG.MAX_BLOCKS_PER_REQUEST || 499;
+    CONFIG.MAX_RETRIES = CONFIG.MAX_RETRIES || 5;
+    CONFIG.BASE_RETRY_DELAY = CONFIG.BASE_RETRY_DELAY || 1000;
+    CONFIG.MAX_RETRY_DELAY = CONFIG.MAX_RETRY_DELAY || 60000;
+    CONFIG.RATE_LIMIT_DELAY = CONFIG.RATE_LIMIT_DELAY || 1250;
+    CONFIG.NFT_ADDRESS = CONFIG.NFT_ADDRESS || "0x7C5f5A4bBd8fD63184577525326123B519429bDc";
+    CONFIG.MULTICALL_ADDRESS = CONFIG.MULTICALL_ADDRESS || "0xcA11bde05977b3631167028862bE2a173976CA11";
+    CONFIG.TRANSFER_TOPIC = CONFIG.TRANSFER_TOPIC || "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    CONFIG.TARGET_POOL_KEY = CONFIG.TARGET_POOL_KEY || {
+        currency0: "0x6B19E31C1813cD00b0d47d798601414b79A3e8AD",
+        currency1: "0xc4D4FD4F4459730d176844c170F2bB323c87Eb3B",
+        fee: 8388608,
+        tickSpacing: 60,
+        hooks: "0x785319f8fCE23Cd733DE94Fd7f34b74A5cAa1000"
+    };
+
+    console.log("Config RPC URL:", CONFIG.RPC_URL);
+    console.log("Config Data URL:", CONFIG.DATA_URL);
+
+    // Fetch existing data first
+    try {
+        await fetchDataFromUrl();
+        console.log("Position data loaded from remote source");
+    } catch (error) {
+        console.warn("Failed to load position data from URL:", error);
+        console.log("Continuing with empty position data...");
+    }
+
+    // Mark as complete since we've attempted to load the data
+    latestSearch = true;
+
+    // Note: The full continuous monitoring implementation (runContinuous, runOnce, scanBlocks, etc.)
+    // is now available in this module. To start continuous monitoring, call:
+    // runContinuous(blocksPerScan, sleepSeconds)
+    //
+    // For now, we just load pre-computed data from the URL.
+    // Call runContinuous() separately if real-time monitoring is needed.
+
+    console.log("✓ Position tracking initialized");
+
+    // Return current state
+    return {
+        nftOwners: getNFTOwners(),
+        validPositions: getValidPositions()
+    };
+}
+
+// ============================================
+// CORE RPC FUNCTIONS
+// ============================================
+
+/**
+ * Makes a raw RPC call with rate limiting
+ * @async
+ * @param {string} method - RPC method name
+ * @param {Array} params - Method parameters
+ * @returns {Promise<any>} RPC result
+ */
+export async function makeRpcCall(method, params) {
+    const payload = {
+        jsonrpc: "2.0",
+        method: method,
+        params: params,
+        id: Date.now()
+    };
+
+    await sleep(CONFIG.RATE_LIMIT_DELAY || 1250);
+
+    const response = await fetch(CONFIG.RPC_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+
+    if (result.error) {
+        const errorMsg = typeof result.error === 'object' ?
+            result.error.message || JSON.stringify(result.error) :
+            result.error;
+        throw new Error(`RPC Error: ${errorMsg}`);
+    }
+
+    return result.result;
+}
+
+/**
+ * Retries a function with exponential backoff
+ * @async
+ * @param {Function} func - Function to retry
+ * @param {...any} args - Arguments to pass to function
+ * @returns {Promise<any>} Function result
+ */
+export async function retryWithBackoff(func, ...args) {
+    const maxRetries = CONFIG.MAX_RETRIES || 5;
+    let lastError;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            return await func(...args);
+        } catch (error) {
+            lastError = error;
+            if (attempt === maxRetries - 1) break;
+
+            const delay = exponentialBackoffDelay(attempt);
+            console.log(`Attempt ${attempt + 1} failed: ${error.message.substring(0, 100)}...`);
+            console.log(`Retrying in ${(delay / 1000).toFixed(2)} seconds...`);
+            await sleep(delay);
+        }
+    }
+
+    console.log(`All ${maxRetries} attempts failed. Last error: ${lastError.message}`);
+    throw lastError;
+}
+
+/**
+ * Gets event logs from blockchain
+ * @async
+ * @param {number} fromBlock - Starting block
+ * @param {number} toBlock - Ending block
+ * @param {Array} topics - Event topics to filter
+ * @param {string} address - Contract address
+ * @returns {Promise<Array>} Event logs
+ */
+export async function getLogs(fromBlock, toBlock, topics, address) {
+    try {
+        return await retryWithBackoff(async () => {
+            return await makeRpcCall('eth_getLogs', [{
+                fromBlock: `0x${fromBlock.toString(16)}`,
+                toBlock: `0x${toBlock.toString(16)}`,
+                address: address,
+                topics: topics
+            }]);
+        });
+    } catch (error) {
+        console.log(`Failed to get logs after retries: ${error.message}`);
+        return [];
+    }
+}
+
+/**
+ * Calls a contract method
+ * @async
+ * @param {string} address - Contract address
+ * @param {string} data - Encoded call data
+ * @param {string|number} block - Block number or "latest"
+ * @returns {Promise<string|null>} Call result
+ */
+export async function callContract(address, data, block = "latest") {
+    try {
+        return await retryWithBackoff(async () => {
+            return await makeRpcCall('eth_call', [{
+                to: address,
+                data: data
+            }, block]);
+        });
+    } catch (error) {
+        console.log(`Failed to call contract after retries: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Gets the latest block number
+ * @async
+ * @returns {Promise<number>} Latest block number
+ */
+export async function getLatestBlock() {
+    try {
+        return await retryWithBackoff(async () => {
+            const result = await makeRpcCall('eth_blockNumber', []);
+            return parseInt(result, 16);
+        });
+    } catch (error) {
+        console.log(`Failed to get latest block after retries: ${error.message}`);
+        return currentBlockzzzz;
+    }
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Saves data to localStorage
+ * @param {string} key - Storage key
+ * @param {any} data - Data to save
+ * @returns {void}
+ */
+export function saveDataLocally(key, data) {
+    try {
+        localStorage.setItem(key, JSON.stringify(data));
+        console.log(`Data saved locally: ${key}`);
+    } catch (error) {
+        console.error(`Error saving data locally:`, error);
+    }
+}
+
+/**
+ * Loads data from localStorage
+ * @param {string} key - Storage key
+ * @returns {any} Loaded data or null
+ */
+export function loadDataLocally(key) {
+    try {
+        const data = localStorage.getItem(key);
+        return data ? JSON.parse(data) : null;
+    } catch (error) {
+        console.error(`Error loading data locally:`, error);
+        return null;
+    }
+}
+
+/**
+ * Sleep helper for delays
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>}
+ */
+export function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculates exponential backoff delay
+ * @param {number} attempt - Current attempt number
+ * @param {number} baseDelay - Base delay in milliseconds
+ * @param {number} maxDelay - Maximum delay in milliseconds
+ * @returns {number} Delay in milliseconds
+ */
+export function exponentialBackoffDelay(attempt, baseDelay = 1000, maxDelay = 60000) {
+    const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
+    return delay;
+}
+
+/**
+ * Checks if error is a rate limit error
+ * @param {Error} error - Error object
+ * @returns {boolean} True if rate limit error
+ */
+export function isRateLimitError(error) {
+    const message = error.message?.toLowerCase() || '';
+    return message.includes('rate limit') ||
+        message.includes('429') ||
+        message.includes('too many requests') ||
+        error.code === 429;
+}
+
+/**
+ * Compares two pool keys for equality
+ * @param {Object} poolKey - Pool key to compare
+ * @param {Object} target - Target pool key
+ * @returns {boolean} True if pool keys match
+ */
+export function poolKeyMatches(poolKey, target) {
+    return poolKey.currency0.toLowerCase() === target.currency0.toLowerCase() &&
+        poolKey.currency1.toLowerCase() === target.currency1.toLowerCase() &&
+        poolKey.fee === target.fee &&
+        poolKey.tickSpacing === target.tickSpacing &&
+        poolKey.hooks.toLowerCase() === target.hooks.toLowerCase();
+}
+
+// ============================================
+// POSITION INFO FUNCTIONS
+// ============================================
+
+/**
+ * Gets pool and position info for a single token ID
+ * @async
+ * @param {number} tokenId - NFT token ID
+ * @returns {Promise<Object|null>} Pool and position info
+ */
+export async function getPoolAndPositionInfo(tokenId) {
+    const functionSelector = "0x7ba03aad";
+    const encodedTokenId = tokenId.toString(16).padStart(64, '0');
+    const data = functionSelector + encodedTokenId;
+
+    const nftAddress = CONFIG.NFT_ADDRESS || "0x7C5f5A4bBd8fD63184577525326123B519429bDc";
+    const result = await callContract(nftAddress, data);
+    if (!result) return null;
+
+    try {
+        const resultBytes = result.slice(2);
+
+        const currency0 = "0x" + resultBytes.slice(24, 64);
+        const currency1 = "0x" + resultBytes.slice(88, 128);
+        const fee = parseInt(resultBytes.slice(128, 192), 16);
+        const tickSpacing = parseInt(resultBytes.slice(192, 256), 16);
+        const hooks = "0x" + resultBytes.slice(280, 320);
+        const info = parseInt(resultBytes.slice(320, 384), 16);
+
+        const poolKey = { currency0, currency1, fee, tickSpacing, hooks };
+        return { poolKey, info };
+
+    } catch (error) {
+        console.log(`Error decoding getPoolAndPositionInfo result: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Gets pool and position info for multiple token IDs using multicall
+ * @async
+ * @param {Array<number>} tokenIds - Array of NFT token IDs
+ * @returns {Promise<Array>} Array of results with success status
+ */
+export async function multicallGetPoolAndPositionInfo(tokenIds) {
+    if (tokenIds.length === 0) return [];
+
+    const provider = new ethers.providers.JsonRpcProvider(CONFIG.RPC_URL);
+    const multicallAddress = CONFIG.MULTICALL_ADDRESS || "0xcA11bde05977b3631167028862bE2a173976CA11";
+    const nftAddress = CONFIG.NFT_ADDRESS || "0x7C5f5A4bBd8fD63184577525326123B519429bDc";
+
+    const POSITION_MANAGER_ABI = [{
+        "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }],
+        "name": "getPoolAndPositionInfo",
+        "outputs": [
+            {
+                "components": [
+                    { "internalType": "address", "name": "currency0", "type": "address" },
+                    { "internalType": "address", "name": "currency1", "type": "address" },
+                    { "internalType": "uint24", "name": "fee", "type": "uint24" },
+                    { "internalType": "int24", "name": "tickSpacing", "type": "int24" },
+                    { "internalType": "address", "name": "hooks", "type": "address" }
+                ],
+                "internalType": "struct PoolKey",
+                "name": "poolKey",
+                "type": "tuple"
+            },
+            {
+                "components": [
+                    { "internalType": "uint128", "name": "liquidity", "type": "uint128" },
+                    { "internalType": "uint256", "name": "feeGrowthInside0LastX128", "type": "uint256" },
+                    { "internalType": "uint256", "name": "feeGrowthInside1LastX128", "type": "uint256" },
+                    { "internalType": "uint128", "name": "tokensOwed0", "type": "uint128" },
+                    { "internalType": "uint128", "name": "tokensOwed1", "type": "uint128" }
+                ],
+                "internalType": "struct PositionInfo",
+                "name": "info",
+                "type": "tuple"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    }];
+
+    const multicallContract = new ethers.Contract(multicallAddress, MULTICALL_ABI, provider);
+    const positionManagerContract = new ethers.Contract(nftAddress, POSITION_MANAGER_ABI, provider);
+
+    const calls = tokenIds.map(tokenId => ({
+        target: positionManagerContract.address,
+        allowFailure: true,
+        callData: positionManagerContract.interface.encodeFunctionData('getPoolAndPositionInfo', [tokenId])
+    }));
+
+    const MAX_RETRIES = 5;
+    const BASE_DELAY = 2000;
+    let retryCount = 0;
+
+    while (retryCount <= MAX_RETRIES) {
+        try {
+            console.log(`Making multicall for ${tokenIds.length} positions... (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+
+            const results = await multicallContract.callStatic.aggregate3(calls);
+            console.log(`Multicall completed successfully, processing ${results.length} results...`);
+
+            const decodedResults = [];
+
+            for (let index = 0; index < results.length; index++) {
+                const result = results[index];
+                const tokenId = tokenIds[index];
+
+                if (!result.success || result.returnData === '0x') {
+                    decodedResults.push({ tokenId, result: null, success: false });
+                    continue;
+                }
+
+                try {
+                    const data = result.returnData;
+
+                    try {
+                        const decoded = ethers.utils.defaultAbiCoder.decode(
+                            [
+                                'tuple(address,address,uint24,int24,address)',
+                                'tuple(uint128,uint256,uint256,uint128,uint128)'
+                            ],
+                            data
+                        );
+
+                        decodedResults.push({
+                            tokenId,
+                            result: {
+                                poolKey: {
+                                    currency0: decoded[0][0],
+                                    currency1: decoded[0][1],
+                                    fee: decoded[0][2],
+                                    tickSpacing: decoded[0][3],
+                                    hooks: decoded[0][4]
+                                },
+                                info: {
+                                    liquidity: decoded[1][0],
+                                    feeGrowthInside0LastX128: decoded[1][1],
+                                    feeGrowthInside1LastX128: decoded[1][2],
+                                    tokensOwed0: decoded[1][3],
+                                    tokensOwed1: decoded[1][4]
+                                }
+                            },
+                            success: true
+                        });
+                    } catch (structDecodeError) {
+                        const decoded = ethers.utils.defaultAbiCoder.decode(
+                            ['address', 'address', 'uint24', 'int24', 'address', 'uint256'],
+                            data
+                        );
+
+                        decodedResults.push({
+                            tokenId,
+                            result: {
+                                poolKey: {
+                                    currency0: decoded[0],
+                                    currency1: decoded[1],
+                                    fee: decoded[2],
+                                    tickSpacing: decoded[3],
+                                    hooks: decoded[4]
+                                },
+                                info: decoded[5]
+                            },
+                            success: true
+                        });
+                    }
+                } catch (decodeError) {
+                    console.log(`All decoding methods failed for token ${tokenId}:`, decodeError.message);
+                    decodedResults.push({ tokenId, result: null, success: false });
+                }
+            }
+
+            const successCount = decodedResults.filter(r => r.success).length;
+            console.log(`Successfully processed ${successCount}/${decodedResults.length} positions`);
+            return decodedResults;
+
+        } catch (error) {
+            console.log(`Multicall error (attempt ${retryCount + 1}): ${error.message}`);
+
+            if (isRateLimitError(error)) {
+                retryCount++;
+                if (retryCount <= MAX_RETRIES) {
+                    const delay = BASE_DELAY * Math.pow(2, retryCount - 1) + Math.random() * 1000;
+                    console.log(`Rate limited. Waiting ${(delay / 1000).toFixed(1)}s before retry ${retryCount}/${MAX_RETRIES}...`);
+                    await sleep(delay);
+                    continue;
+                } else {
+                    console.log(`Max retries (${MAX_RETRIES}) reached. Giving up on this batch.`);
+                    return tokenIds.map(tokenId => ({ tokenId, result: null, success: false }));
+                }
+            } else {
+                console.log(`Non-rate-limit error: ${error.message}`);
+                return tokenIds.map(tokenId => ({ tokenId, result: null, success: false }));
+            }
+        }
+    }
+
+    return tokenIds.map(tokenId => ({ tokenId, result: null, success: false }));
+}
+
+// ============================================
+// LOG PROCESSING FUNCTIONS
+// ============================================
+
+/**
+ * Processes mint Transfer logs (from 0x00) to extract new positions
+ * @param {Array} logs - Transfer event logs
+ * @returns {Array} Array of position objects with tokenId, txHash, blockNumber
+ */
+export function processMintTransferLogs(logs) {
+    const positions = [];
+    const transferTopic = CONFIG.TRANSFER_TOPIC || "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+    for (const log of logs) {
+        try {
+            const topics = log.topics || [];
+            const txHash = log.transactionHash || "";
+            const blockNumber = parseInt(log.blockNumber, 16);
+
+            if (topics.length >= 4 && topics[0] === transferTopic) {
+                const fromAddress = topics[1];
+                if (fromAddress === "0x0000000000000000000000000000000000000000000000000000000000000000") {
+                    const tokenId = parseInt(topics[3], 16);
+                    positions.push({ tokenId, txHash, blockNumber });
+                    console.log(`Found mint Transfer with token ID: ${tokenId}`);
+                }
+            }
+        } catch (error) {
+            console.log(`Error processing mint Transfer log: ${error.message}`);
+            continue;
+        }
+    }
+
+    return positions;
+}
+
+/**
+ * Processes regular Transfer logs for existing valid positions
+ * @param {Array} logs - Transfer event logs
+ * @returns {Object} Mapping of tokenId -> new owner address
+ */
+export function processTransferLogs(logs) {
+    const transfers = {};
+    const validTokenIds = new Set(validPositions.map(pos => pos.tokenId));
+    const transferTopic = CONFIG.TRANSFER_TOPIC || "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+    if (validTokenIds.size === 0) {
+        return transfers;
+    }
+
+    let processedCount = 0;
+    let ignoredCount = 0;
+
+    for (const log of logs) {
+        try {
+            const topics = log.topics || [];
+
+            if (topics.length >= 4 && topics[0] === transferTopic) {
+                const fromAddress = "0x" + topics[1].slice(-40);
+                const toAddress = "0x" + topics[2].slice(-40);
+                const tokenId = parseInt(topics[3], 16);
+
+                if (validTokenIds.has(tokenId)) {
+                    transfers[tokenId] = toAddress;
+                    console.log(`      ✓ Valid Transfer: Token ${tokenId} from ${fromAddress} to ${toAddress}`);
+                    processedCount++;
+                } else {
+                    ignoredCount++;
+                }
+            }
+        } catch (error) {
+            console.log(`Error processing Transfer log: ${error.message}`);
+            continue;
+        }
+    }
+
+    if (ignoredCount > 0) {
+        console.log(`      Ignored ${ignoredCount} transfers for non-valid positions`);
+    }
+    if (processedCount > 0) {
+        console.log(`      Processed ${processedCount} transfers for valid positions`);
+    }
+
+    return transfers;
+}
+
+// ============================================
+// POSITION VALIDATION FUNCTIONS
+// ============================================
+
+/**
+ * Validates positions in batches using multicall
+ * @async
+ * @param {Array} positionData - Array of position data with tokenId, txHash, blockNumber
+ * @param {number} batchSize - Number of positions to process per batch
+ * @returns {Promise<Object>} Object with newValidPositions and newInvalidPositions arrays
+ */
+export async function validatePositions(positionData, batchSize = 50) {
+    const newValidPositions = [];
+    const newInvalidPositions = [];
+    const targetPoolKey = CONFIG.TARGET_POOL_KEY || {
+        currency0: "0x6B19E31C1813cD00b0d47d798601414b79A3e8AD",
+        currency1: "0xc4D4FD4F4459730d176844c170F2bB323c87Eb3B",
+        fee: 8388608,
+        tickSpacing: 60,
+        hooks: "0x785319f8fCE23Cd733DE94Fd7f34b74A5cAa1000"
+    };
+
+    for (let i = 0; i < positionData.length; i += batchSize) {
+        const batch = positionData.slice(i, i + batchSize);
+        const tokenIds = batch.map(p => p.tokenId);
+        await sleep(3200);
+        console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(positionData.length / batchSize)} (${batch.length} positions)`);
+
+        const multicallResults = await multicallGetPoolAndPositionInfo(tokenIds);
+
+        for (let j = 0; j < batch.length; j++) {
+            const { tokenId, txHash, blockNumber } = batch[j];
+            const multicallResult = multicallResults[j];
+
+            if (!multicallResult.success || !multicallResult.result) {
+                console.log(`Could not get pool info for token ${tokenId}`);
+                continue;
+            }
+
+            const { poolKey, info } = multicallResult.result;
+            console.log(`\nToken ${tokenId}:`);
+
+            const owner = nftOwners[tokenId] || "Unknown";
+            const timestamp = new Date().toISOString();
+            const position = {
+                tokenId,
+                poolKey,
+                owner,
+                blockNumber,
+                txHash,
+                timestamp
+            };
+
+            if (poolKeyMatches(poolKey, targetPoolKey)) {
+                console.log(`  ✓ VALID - matches target pool`);
+                newValidPositions.push(position);
+            } else {
+                newInvalidPositions.push(position);
+            }
+        }
+
+        if (i + batchSize < positionData.length) {
+            await sleep(50);
+        }
+    }
+
+    return { newValidPositions, newInvalidPositions };
+}
+
+/**
+ * Validates all positions in a single multicall (no batching)
+ * @async
+ * @param {Array} positionData - Array of position data with tokenId, txHash, blockNumber
+ * @returns {Promise<Object>} Object with newValidPositions and newInvalidPositions arrays
+ */
+export async function validatePositionsFullMulticall(positionData) {
+    const newValidPositions = [];
+    const newInvalidPositions = [];
+    const targetPoolKey = CONFIG.TARGET_POOL_KEY || {
+        currency0: "0x6B19E31C1813cD00b0d47d798601414b79A3e8AD",
+        currency1: "0xc4D4FD4F4459730d176844c170F2bB323c87Eb3B",
+        fee: 8388608,
+        tickSpacing: 60,
+        hooks: "0x785319f8fCE23Cd733DE94Fd7f34b74A5cAa1000"
+    };
+
+    const tokenIds = positionData.map(p => p.tokenId);
+    console.log(`Making single multicall for ${tokenIds.length} positions...`);
+
+    const multicallResults = await multicallGetPoolAndPositionInfo(tokenIds);
+
+    for (let i = 0; i < positionData.length; i++) {
+        const { tokenId, txHash, blockNumber } = positionData[i];
+        const multicallResult = multicallResults[i];
+
+        if (!multicallResult.success || !multicallResult.result) {
+            console.log(`Could not get pool info for token ${tokenId}`);
+            continue;
+        }
+
+        const { poolKey, info } = multicallResult.result;
+        console.log(`\nToken ${tokenId}:`);
+        console.log(`  Currency0: ${poolKey.currency0}`);
+        console.log(`  Currency1: ${poolKey.currency1}`);
+        console.log(`  Fee: ${poolKey.fee}`);
+        console.log(`  TickSpacing: ${poolKey.tickSpacing}`);
+        console.log(`  Hooks: ${poolKey.hooks}`);
+        console.log(`  Info: ${info}`);
+
+        const owner = nftOwners[tokenId] || "Unknown";
+        const timestamp = new Date().toISOString();
+        const position = {
+            tokenId,
+            poolKey,
+            owner,
+            blockNumber,
+            txHash,
+            timestamp
+        };
+
+        if (poolKeyMatches(poolKey, targetPoolKey)) {
+            console.log(`  ✓ VALID - matches target pool`);
+            newValidPositions.push(position);
+        } else {
+            console.log(`  ✗ INVALID - does not match target pool`);
+            newInvalidPositions.push(position);
+        }
+    }
+
+    return { newValidPositions, newInvalidPositions };
+}
+
+// ============================================
+// BLOCK SCANNING FUNCTIONS
+// ============================================
+
+/**
+ * Calculates block ranges for scanning
+ * @param {number} fromBlock - Starting block
+ * @param {number} toBlock - Ending block
+ * @returns {Array} Array of {start, end} range objects
+ */
+export function calculateBlockRanges(fromBlock, toBlock) {
+    const ranges = [];
+    const maxBlocksPerRequest = CONFIG.MAX_BLOCKS_PER_REQUEST || 499;
+    let current = fromBlock;
+
+    while (current <= toBlock) {
+        const endBlock = Math.min(current + maxBlocksPerRequest - 1, toBlock);
+        ranges.push({ start: current, end: endBlock });
+        current = endBlock + 1;
+    }
+
+    return ranges;
+}
+
+/**
+ * Scans blocks for Transfer events and validates positions
+ * @async
+ * @param {number} fromBlock - Starting block
+ * @param {number} toBlock - Ending block
+ * @param {number} loopNumbers - Total number of loops for progress tracking
+ * @returns {Promise<void>}
+ */
+export async function scanBlocks(fromBlock, toBlock, loopNumbers) {
+    console.log(`\nScanning blocks ${fromBlock} to ${toBlock}...`);
+    const blockRanges = calculateBlockRanges(fromBlock, toBlock);
+    const nftAddress = CONFIG.NFT_ADDRESS || "0x7C5f5A4bBd8fD63184577525326123B519429bDc";
+    const transferTopic = CONFIG.TRANSFER_TOPIC || "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+    let loopCounter = 0;
+
+    for (const { start, end } of blockRanges) {
+        loopCounter++;
+
+        if (typeof updateLoadingStatusWidget === 'function' && typeof setLoadingProgress === 'function') {
+            updateLoadingStatusWidget(`Loading All Positions for users<br>Loop #: ${loopCounter} MaxLoop #: ${loopNumbers}`);
+            setLoadingProgress(Math.floor((loopCounter) / loopNumbers * 100));
+        }
+
+        console.log(` Scanning sub-range: ${start} to ${end} (${end - start + 1} blocks)`);
+
+        const allTransfers = {};
+
+        const transferLogs = await getLogs(start, end, [transferTopic], nftAddress);
+        console.log(` Found ${transferLogs.length} Transfer events`);
+        await sleep(600);
+
+        const mintTransfers = transferLogs.filter(log =>
+            log.topics[1] === "0x0000000000000000000000000000000000000000000000000000000000000000"
+        );
+
+        console.log(` Found ${mintTransfers.length} mint events (transfers from 0x00)`);
+
+        const positions = processMintTransferLogs(mintTransfers);
+
+        if (positions.length > 0) {
+            const { newValidPositions, newInvalidPositions } = await validatePositions(positions);
+            validPositions.push(...newValidPositions);
+            invalidPositions.push(...newInvalidPositions);
+
+            for (const validPos of newValidPositions) {
+                const mintLog = mintTransfers.find(log =>
+                    parseInt(log.topics[3], 16) === validPos.tokenId
+                );
+                if (mintLog) {
+                    const owner = "0x" + mintLog.topics[2].slice(26);
+                    allTransfers[validPos.tokenId] = owner;
+                    validPos.owner = owner;
+                    console.log(`  ✓ Added new valid position ${validPos.tokenId} with owner ${owner}`);
+                }
+            }
+        }
+
+        const nonMintTransfers = transferLogs.filter(log =>
+            log.topics[1] !== "0x0000000000000000000000000000000000000000000000000000000000000000"
+        );
+
+        if (nonMintTransfers.length > 0) {
+            const validTokenIds = new Set(validPositions.map(pos => pos.tokenId));
+            const regularTransfers = processTransferLogs(nonMintTransfers);
+
+            let validTransferCount = 0;
+            for (const [tokenId, owner] of Object.entries(regularTransfers)) {
+                if (validTokenIds.has(parseInt(tokenId))) {
+                    allTransfers[tokenId] = owner;
+                    validTransferCount++;
+                }
+            }
+
+            if (validTransferCount > 0) {
+                console.log(`  Processed ${validTransferCount} transfers for valid positions`);
+            } else {
+                console.log(`  Ignored ${nonMintTransfers.length} transfers for non-valid positions`);
+            }
+        }
+
+        if (Object.keys(allTransfers).length > 0) {
+            Object.assign(nftOwners, allTransfers);
+
+            for (const position of validPositions) {
+                if (allTransfers[position.tokenId]) {
+                    position.owner = allTransfers[position.tokenId];
+                }
+            }
+
+            console.log(`  Updated ownership for ${Object.keys(allTransfers).length} positions`);
+        }
+
+        if (typeof saveDataLocally === 'function') {
+            const storageKey = 'testnet_uniswap_v4_local_data';
+            saveDataLocally(storageKey, {
+                metadata: {
+                    last_updated: new Date().toISOString(),
+                    current_block: currentBlockzzzz,
+                    total_valid_positions: validPositions.length,
+                    total_nft_owners: Object.keys(nftOwners).length
+                },
+                valid_positions: validPositions,
+                nft_owners: nftOwners
+            });
+        }
+    }
+}
+
+/**
+ * Prints a summary of monitoring results
+ * @returns {void}
+ */
+export function printSummary() {
+    const startBlock = CONFIG.START_BLOCK || 35937447;
+    console.log(`\n${'='.repeat(50)}`);
+    console.log("SUMMARY");
+    console.log(`${'='.repeat(50)}`);
+    console.log(`Blocks scanned: ${startBlock} to ${currentBlockzzzz}`);
+    console.log(`Valid positions: ${validPositions.length}`);
+    console.log(`Invalid positions: ${invalidPositions.length}`);
+    console.log(`NFT owners tracked: ${Object.keys(nftOwners).length}`);
+
+    if (validPositions.length > 0) {
+        console.log(`\nVALID POSITIONS:`);
+        for (const pos of validPositions) {
+            console.log(`  Token ID: ${pos.tokenId}, Owner: ${pos.owner}, Block: ${pos.blockNumber}`);
+        }
+    } else {
+        console.log(`\nNo valid positions found yet`);
+    }
+
+    if (Object.keys(nftOwners).length > 0) {
+        console.log(`\nVALID NFT OWNERS (tracked):`);
+        for (const [tokenId, owner] of Object.entries(nftOwners)) {
+            console.log(`  Token ID: ${tokenId}, Owner: ${owner}`);
+        }
+    } else {
+        console.log(`No valid NFT owners being tracked`);
+    }
+}
+
+// ============================================
+// MONITORING CONTROL FUNCTIONS
+// ============================================
+
+/**
+ * Runs a single scan cycle
+ * @async
+ * @param {number} blocksPerScan - Maximum blocks to scan in one cycle
+ * @returns {Promise<number>} Latest block number
+ */
+export async function runOnce(blocksPerScan = 1000) {
+    const latestBlock = await getLatestBlock();
+
+    if (currentBlockzzzz <= latestBlock) {
+        const blocksToScan = Math.min(blocksPerScan, latestBlock - currentBlockzzzz + 1);
+        const toBlock = currentBlockzzzz + blocksToScan - 1;
+
+        console.log(`Latest block: ${latestBlock}, Current: ${currentBlockzzzz}, Scanning to: ${toBlock}`);
+
+        await scanBlocks(currentBlockzzzz, toBlock, 1);
+        currentBlockzzzz = toBlock + 1;
+    } else {
+        console.log(`Already caught up to block ${latestBlock}`);
+    }
+
+    printSummary();
+    return latestBlock;
+}
+
+/**
+ * Runs continuous monitoring
+ * @async
+ * @param {number} blocksPerScan - Maximum blocks to scan per cycle
+ * @param {number} sleepSeconds - Seconds to wait between scans
+ * @returns {Promise<void>}
+ */
+export async function runContinuous(blocksPerScan = 1000, sleepSeconds = 10) {
+    console.log("Starting continuous monitoring...");
+    console.log("Will continuously scan to the newest block");
+    console.log("Call stopMonitoring() to stop");
+
+    if (typeof showLoadingWidget === 'function') {
+        showLoadingWidget('Loading all positions from Uniswap');
+    }
+    if (typeof updateLoadingStatusWidget === 'function') {
+        updateLoadingStatusWidget('Loading All Positions logs');
+    }
+
+    isRunning = true;
+    WeAreSearchingLogsRightNow = false;
+    latestSearch = false;
+
+    while (isRunning) {
+        WeAreSearchingLogsRightNow = true;
+
+        try {
+            const latestBlock = await getLatestBlock();
+            const numOfLoops = Math.ceil((latestBlock - currentBlockzzzz) / 499);
+
+            if (typeof updateLoadingStatusWidget === 'function') {
+                updateLoadingStatusWidget(`Loading All Positions for users<br>Loop #: 0 MaxLoop #: ${numOfLoops}`);
+            }
+            if (typeof setLoadingProgress === 'function') {
+                setLoadingProgress(0);
+            }
+
+            if (currentBlockzzzz <= latestBlock) {
+                const remainingBlocks = latestBlock - currentBlockzzzz + 1;
+                console.log(`\n${remainingBlocks} blocks behind latest (${currentBlockzzzz} → ${latestBlock})`);
+
+                while (currentBlockzzzz <= latestBlock && isRunning) {
+                    const currentLatest = await getLatestBlock();
+                    const blocksToScan = Math.min(blocksPerScan, currentLatest - currentBlockzzzz + 1);
+                    const toBlock = currentBlockzzzz + blocksToScan - 1;
+
+                    if (blocksToScan > 0) {
+                        console.log(`Scanning blocks ${currentBlockzzzz} to ${toBlock} (${blocksToScan} blocks)`);
+                        await scanBlocks(currentBlockzzzz, toBlock, numOfLoops);
+                        currentBlockzzzz = toBlock + 1;
+
+                        if (currentBlockzzzz <= currentLatest && isRunning) {
+                            await sleep(2000);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                printSummary();
+                if (typeof hideLoadingWidget === 'function') {
+                    hideLoadingWidget();
+                }
+                console.log(`✓ Caught up to block ${latestBlock}`);
+                WeAreSearchingLogsRightNow = false;
+            } else {
+                WeAreSearchingLogsRightNow = false;
+                console.log(`Up to date at block ${latestBlock}`);
+            }
+
+            if (isRunning && !forceRefresh) {
+                latestSearch = true;
+                console.log(`Waiting ${sleepSeconds}s before checking for new blocks...`);
+                let waitTime = 0;
+                while (!forceRefresh && waitTime < sleepSeconds) {
+                    await sleep(1000);
+                    waitTime++;
+                    if (waitTime % 10 === 0) {
+                        console.log(`Still waiting... ${sleepSeconds - waitTime}s remaining`);
+                    }
+                }
+            }
+
+            if (forceRefresh) {
+                forceRefresh = false;
+                console.log("Force refresh activated - checking immediately");
+            }
+        } catch (error) {
+            console.error(`Error in monitoring loop: ${error.message}`);
+            if (isRunning) {
+                console.log("Retrying in 30 seconds...");
+                await sleep(30000);
+            }
+        }
+    }
+
+    console.log("Monitor stopped.");
+    if (typeof hideLoadingWidget === 'function') {
+        hideLoadingWidget();
+    }
+    printSummary();
+}
+
+/**
+ * Stops the continuous monitoring
+ * @returns {void}
+ */
+export function stopMonitoring() {
+    isRunning = false;
+    console.log("Stopping monitor...");
+}
+
+// ============================================
+// EXPORTS
+// ============================================
+
+console.log('Data-loader module initialized');

@@ -1,0 +1,1201 @@
+/**
+ * @module positions-ratio
+ * @description Position ratio calculations for create, increase, and stake operations
+ *
+ * Handles:
+ * - Token ratio calculations for creating positions
+ * - Token ratio calculations for increasing liquidity
+ * - Token ratio calculations for stake increase operations
+ * - Optimal amount calculations with wallet balance checks
+ * - Token A and Token B priority calculations
+ */
+
+// Import dependencies
+import { tokenAddresses, hookAddress } from './config.js';
+import { connectWallet } from './wallet.js';
+import { positionData, stakingPositionData, updateTotalLiqIncrease } from './positions.js';
+import { updateTotalLiqIncreaseSTAKING } from './staking.js';
+
+// Create aliases for commonly used addresses
+const Address_ZEROXBTC_TESTNETCONTRACT = tokenAddresses['0xBTC'];
+const HookAddress = hookAddress;
+const tokenAddress = tokenAddresses['B0x'];
+
+// ============================================
+// GLOBAL STATE ACCESS
+// ============================================
+
+// These need to be accessed from window object since they're set globally
+const getWalletConnected = () => window.walletConnected;
+const getWalletBalances = () => window.walletBalances;
+const getRatioz = () => window.ratioz;
+const getCurrentSqrtPricex96 = () => window.Current_getsqrtPricex96;
+
+// ============================================
+// THROTTLING STATE
+// ============================================
+
+let lastCallTime = 0;
+const THROTTLE_DELAY = 2000; // 2 seconds
+let isProgrammaticUpdate = false;
+let ratiozToSave = 0;
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Throttled version of getSqrtRtAndPriceRatio
+ * Prevents excessive calls to the price ratio function
+ * @param {string} NameOfFunction - Name of calling function for logging
+ * @returns {Promise<any>} Price ratio data or null if throttled
+ */
+async function throttledGetSqrtRtAndPriceRatio(NameOfFunction = "General") {
+    const now = Date.now();
+
+    if (now - lastCallTime < THROTTLE_DELAY) {
+        console.log(`Function throttled. Please wait ${Math.ceil((THROTTLE_DELAY - (now - lastCallTime)) / 1000)} more seconds.`);
+        return null;
+    }
+
+    lastCallTime = now;
+
+    // Call the global function (needs to be available)
+    if (typeof window.getSqrtRtAndPriceRatio === 'function') {
+        return await window.getSqrtRtAndPriceRatio(NameOfFunction);
+    } else {
+        console.error('getSqrtRtAndPriceRatio function not available');
+        return null;
+    }
+}
+
+/**
+ * Calculate optimal amounts with proper priority handling
+ * @param {string} tokenAValue - Token A symbol
+ * @param {string} tokenBValue - Token B symbol
+ * @param {string} tokenAAmount - Token A amount
+ * @param {string} tokenBAmount - Token B amount
+ * @param {Object} walletBalances - Wallet balances object
+ * @param {bigint} ratioz - Price ratio
+ * @param {string} priorityToken - 'A' or 'B'
+ * @param {boolean} StakeSection - Whether this is for staking section
+ * @returns {Object} Calculated amounts and adjustment info
+ */
+function calculateOptimalAmounts(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz, priorityToken = null, StakeSection = false) {
+    // This function needs to be extracted from script.js
+    // For now, call window version if available
+    if (typeof window.calculateOptimalAmounts === 'function') {
+        return window.calculateOptimalAmounts(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz, priorityToken, StakeSection);
+    }
+
+    console.error('calculateOptimalAmounts function not available');
+    return {
+        amountToDeposit: 0n,
+        amountWith8Decimals0xBTC: 0n,
+        needsAdjustment: false,
+        limitingFactor: null
+    };
+}
+
+// Wrapper functions for different priority modes
+function calculateOptimalAmountsWithTokenAPriority(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz) {
+    return calculateOptimalAmounts(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz, 'A', false);
+}
+
+function calculateOptimalAmountsWithTokenBPriority(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz) {
+    return calculateOptimalAmounts(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz, 'B', false);
+}
+
+function calculateOptimalAmountsWithTokenAPrioritySTAKESECTIONI(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz) {
+    console.log("Calling Token A calculateOptimalAmounts");
+    return calculateOptimalAmounts(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz, 'A', true);
+}
+
+function calculateOptimalAmountsWithTokenBPrioritySTAKESECTIONI(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz) {
+    console.log("Calling Token B calculateOptimalAmounts");
+    return calculateOptimalAmounts(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz, 'B', true);
+}
+
+/**
+ * Handle max button click for regular increase section
+ * @param {string} tokenSymbol - Token symbol
+ * @param {HTMLElement} inputElement - Input element
+ * @returns {Object} Result of max amount calculation
+ */
+function handleMaxButtonClick(tokenSymbol, inputElement) {
+    const tokenALabel = document.querySelector('#increase #tokenALabel');
+    const tokenBLabel = document.querySelector('#increase #tokenBLabel');
+    const tokenAValue = tokenALabel.textContent.trim();
+    const tokenBValue = tokenBLabel.textContent.trim();
+
+    const positionSelect = document.querySelector('#increase select');
+    const selectedPositionId = positionSelect.value;
+    const position = positionData[selectedPositionId];
+    console.log(" handleMaxButtonClick position: ", position);
+
+    const ratioz = getRatioz();
+    const walletBalances = getWalletBalances();
+
+    const useFees = true;
+
+    // Call global function if available
+    if (typeof window.getMaxAmountsWithProperLimiting === 'function') {
+        const result = window.getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, tokenSymbol, position, useFees);
+
+        if (!result.requestFulfilled) {
+            console.log(`Max ${tokenSymbol} request could not be fulfilled: ${result.reason}`);
+            console.log(`Using max amounts based on actual limiting factor: ${result.actualLimitingFactor}`);
+        }
+
+        const createInputs = document.querySelectorAll('#increase input[type="number"]');
+        const amountInputA = createInputs[0];
+        const amountInputB = createInputs[1];
+
+        const tokenAinputAddress = tokenAddresses[tokenAValue];
+
+        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputA.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
+            amountInputB.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
+        } else {
+            amountInputA.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
+            amountInputB.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
+        }
+
+        updateTotalLiqIncrease();
+        return result;
+    }
+
+    console.error('getMaxAmountsWithProperLimiting function not available');
+    return null;
+}
+
+/**
+ * Handle max button click for stake increase section
+ * @param {string} tokenSymbol - Token symbol
+ * @param {HTMLElement} inputElement - Input element
+ * @returns {Object} Result of max amount calculation
+ */
+function handleMaxButtonClickStakeIncrease(tokenSymbol, inputElement) {
+    const tokenALabel = document.querySelector('#stake-increase #tokenALabelINC');
+    const tokenBLabel = document.querySelector('#stake-increase #tokenBLabelINC');
+    const tokenAValue = tokenALabel.textContent;
+    const tokenBValue = tokenBLabel.textContent;
+
+    const positionSelect = document.querySelector('#stake-increase select');
+    const selectedPositionId = positionSelect.value;
+    const position = stakingPositionData[selectedPositionId];
+    console.log(" handleMaxButtonClickStakeIncrease position: ", position);
+
+    const ratioz = getRatioz();
+    const walletBalances = getWalletBalances();
+
+    const useFees = true;
+
+    if (typeof window.getMaxAmountsWithProperLimiting === 'function') {
+        const result = window.getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, tokenSymbol, position, useFees);
+
+        if (!result.requestFulfilled) {
+            console.log(`Max ${tokenSymbol} request could not be fulfilled: ${result.reason}`);
+            console.log(`Using max amounts based on actual limiting factor: ${result.actualLimitingFactor}`);
+        }
+
+        const createInputs = document.querySelectorAll('#stake-increase input[type="number"]');
+        const amountInputA = createInputs[0];
+        const amountInputB = createInputs[1];
+
+        const tokenAinputAddress = tokenAddresses[tokenAValue];
+
+        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputA.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
+            amountInputB.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
+        } else {
+            amountInputA.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
+            amountInputB.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
+        }
+
+        if (typeof updateTotalLiqIncreaseSTAKING === 'function') {
+            updateTotalLiqIncreaseSTAKING();
+        }
+
+        return result;
+    }
+
+    console.error('getMaxAmountsWithProperLimiting function not available');
+    return null;
+}
+
+// ============================================
+// CREATE POSITION RATIO FUNCTIONS
+// ============================================
+
+/**
+ * Calculate ratio when Token B input changes in create position section
+ * Updates Token A based on Token B value and current price ratio
+ * @async
+ * @returns {Promise<void>}
+ */
+async function getRatioCreatePositiontokenB() {
+    const walletConnected = getWalletConnected();
+
+    if (!walletConnected) {
+        await connectWallet();
+    }
+
+    const createInputs = document.querySelectorAll('#create input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    if (!amountInputA || !amountInputB) {
+        console.error("Could not find amount input fields");
+        return;
+    }
+
+    const tokenASelect = document.querySelector('#create .form-group:nth-child(1) select');
+    const tokenBSelect = document.querySelector('#create .form-group:nth-child(2) select');
+
+    const selectedOptionA = tokenASelect.options[tokenASelect.selectedIndex];
+    const selectedOptionB = tokenBSelect.options[tokenBSelect.selectedIndex];
+
+    const tokenAinputAddress = tokenAddresses[selectedOptionA.value];
+    const tokenBinputAddress = tokenAddresses[selectedOptionB.value];
+
+    const tokenAInput = amountInputA.value;
+    const tokenBInput = amountInputB.value;
+
+    console.log("Currently amountInputA value:", tokenAInput);
+    console.log("Currently amountInputB value:", tokenBInput);
+
+    const amountBtoCreate = ethers.utils.parseUnits(tokenBInput, selectedOptionB.value === "0xBTC" ? 8 : 18);
+
+    await throttledGetSqrtRtAndPriceRatio();
+
+    const ratioz = getRatioz();
+    let amountToDeposit, amountWith8Decimals0xBTC;
+
+    if (tokenBinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+        console.log("TokenB is 0xBTC, calculating TokenA amount");
+        const calculatedPriceRatio = BigInt(ratioz);
+
+        const amountZer0XIn18Decimals = BigInt(amountBtoCreate) * 10n ** 10n;
+        amountWith8Decimals0xBTC = amountBtoCreate;
+
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) < BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            const priceIn18Decimals = calculatedPriceRatio / (10n ** 10n);
+            amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+        } else {
+            amountToDeposit = (amountZer0XIn18Decimals * (10n ** 18n)) / (calculatedPriceRatio * 10n ** 10n);
+        }
+
+        console.log(`TokenB (0xBTC) amount: ${ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8)}`);
+        console.log(`Calculated TokenA (B0x) amount: ${ethers.utils.formatEther(amountToDeposit)}`);
+
+    } else {
+        console.log("TokenB is B0x, calculating TokenA amount");
+        const priceRatio = BigInt(ratioz);
+        amountToDeposit = amountBtoCreate;
+
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) < BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            amountWith8Decimals0xBTC = (BigInt(amountBtoCreate) * (10n ** 18n)) / priceRatio;
+        } else {
+            amountWith8Decimals0xBTC = (BigInt(amountBtoCreate) * priceRatio) / (10n ** 18n);
+        }
+
+        console.log(`TokenB (B0x) amount: ${ethers.utils.formatEther(amountToDeposit)}`);
+        console.log(`Calculated TokenA (0xBTC) amount: ${ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8)}`);
+    }
+
+    // Wallet balance checks
+    const walletBalances = getWalletBalances();
+    const zeroxbtcdecimal = amountWith8Decimals0xBTC.toString();
+    const wallet_zeroxbtc = ethers.utils.parseUnits(walletBalances['0xBTC'], 8).toString();
+
+    if (parseFloat(zeroxbtcdecimal) > parseFloat(wallet_zeroxbtc)) {
+        alert("Too much 0xBTC - you don't have enough, lower the amount!");
+        if (typeof window.getMaxCreatePosition === 'function') {
+            await window.getMaxCreatePosition();
+        }
+        return;
+    }
+
+    const b0xdecimal = amountToDeposit.toString();
+    const wallet_b0x = ethers.utils.parseUnits(walletBalances['B0x'], 18).toString();
+
+    if (parseFloat(b0xdecimal) > parseFloat(wallet_b0x)) {
+        alert("Too much B0x - you don't have enough, lower the amount!");
+        if (typeof window.getMaxCreatePosition === 'function') {
+            await window.getMaxCreatePosition();
+        }
+        return;
+    }
+
+    const amountToDepositBN = ethers.BigNumber.from(amountToDeposit.toString());
+    const amountToDepositBN2 = ethers.BigNumber.from(amountWith8Decimals0xBTC.toString());
+
+    try {
+        console.log("Updating TokenA input with calculated value");
+
+        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputA.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+            amountInputB.value = ethers.utils.formatUnits(amountToDeposit, 18);
+        } else {
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+        }
+
+        ratiozToSave = 10000 * amountToDepositBN / amountToDepositBN2;
+
+    } catch (error) {
+        console.error(`Error in getRatioCreatePositiontokenB:`, error);
+    }
+}
+
+/**
+ * Calculate ratio when Token A input changes in create position section
+ * Updates Token B based on Token A value and current price ratio
+ * @async
+ * @returns {Promise<void>}
+ */
+async function getRatioCreatePositiontokenA() {
+    console.log("running: getRatioCreatePositiontokenA");
+
+    const walletConnected = getWalletConnected();
+
+    if (!walletConnected) {
+        await connectWallet();
+    }
+
+    const tokenASelect = document.querySelector('#create .form-group:nth-child(1) select');
+    const tokenBSelect = document.querySelector('#create .form-group:nth-child(2) select');
+
+    const selectedOptionA = tokenASelect.options[tokenASelect.selectedIndex];
+    const selectedOptionB = tokenBSelect.options[tokenBSelect.selectedIndex];
+
+    const tokenAinputAddress = tokenAddresses[selectedOptionA.value];
+    const tokenBinputAddress = tokenAddresses[selectedOptionB.value];
+
+    const createInputs = document.querySelectorAll('#create input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    if (!amountInputA || !amountInputB) {
+        console.error("Could not find amount input fields");
+        return;
+    }
+
+    const tokenAInput = amountInputA.value;
+    const tokenBInput = amountInputB.value;
+
+    let amountAtoCreate = ethers.utils.parseUnits(tokenAInput, 18);
+    if (selectedOptionA.value === "0xBTC") {
+        amountAtoCreate = ethers.utils.parseUnits(tokenAInput, 8);
+    }
+
+    await throttledGetSqrtRtAndPriceRatio();
+
+    const ratioz = getRatioz();
+    let amountToDeposit, amountWith8Decimals0xBTC;
+
+    if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+        console.log("TokenA is 0xBTC, calculating TokenB amount");
+        const calculatedPriceRatio = BigInt(ratioz);
+
+        const amountZer0XIn18Decimals = BigInt(amountAtoCreate) * 10n ** 10n;
+        amountWith8Decimals0xBTC = amountAtoCreate;
+
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) < BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            const priceIn18Decimals = calculatedPriceRatio / (10n ** 10n);
+            amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+        } else {
+            amountToDeposit = (amountZer0XIn18Decimals * (10n ** 18n)) / (calculatedPriceRatio * 10n ** 10n);
+        }
+
+        console.log(`TokenA (0xBTC) amount: ${ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8)}`);
+        console.log(`Calculated TokenB (B0x) amount: ${ethers.utils.formatEther(amountToDeposit)}`);
+    } else {
+        console.log("TokenA is B0x, calculating TokenB amount");
+        const priceRatio = BigInt(ratioz);
+        amountToDeposit = BigInt(amountAtoCreate);
+
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) < BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            amountWith8Decimals0xBTC = (amountToDeposit * (10n ** 18n)) / priceRatio;
+        } else {
+            amountWith8Decimals0xBTC = (amountToDeposit * priceRatio) / (10n ** 18n);
+        }
+
+        console.log(`TokenA (B0x) amount: ${ethers.utils.formatEther(amountToDeposit)}`);
+        console.log(`Calculated TokenB (0xBTC) amount: ${ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8)}`);
+    }
+
+    // Wallet balance checks
+    const walletBalances = getWalletBalances();
+    const zeroxbtcdecimal = amountWith8Decimals0xBTC.toString();
+    const wallet_zeroxbtc = ethers.utils.parseUnits(walletBalances['0xBTC'], 8).toString();
+
+    if (parseFloat(zeroxbtcdecimal) > parseFloat(wallet_zeroxbtc)) {
+        alert("Too much 0xBTC - you don't have enough, lower the amount!");
+        if (typeof window.getMaxCreatePosition === 'function') {
+            await window.getMaxCreatePosition();
+        }
+        return;
+    }
+
+    const b0xdecimal = amountToDeposit.toString();
+    const wallet_b0x = ethers.utils.parseUnits(walletBalances['B0x'], 18).toString();
+
+    if (parseFloat(b0xdecimal) > parseFloat(wallet_b0x)) {
+        alert("Too much B0x - you don't have enough, lower the amount!");
+        if (typeof window.getMaxCreatePosition === 'function') {
+            await window.getMaxCreatePosition();
+        }
+        return;
+    }
+
+    const amountToDepositBN = ethers.BigNumber.from(amountToDeposit.toString());
+    const amountToDepositBN2 = ethers.BigNumber.from(amountWith8Decimals0xBTC.toString());
+
+    try {
+        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputA.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+            amountInputB.value = ethers.utils.formatUnits(amountToDeposit, 18);
+        } else {
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+        }
+
+        ratiozToSave = 10000 * amountToDepositBN / amountToDepositBN2;
+
+    } catch (error) {
+        console.error(`Error in getRatioCreatePositiontokenA:`, error);
+    }
+}
+
+// ============================================
+// INCREASE POSITION RATIO FUNCTIONS
+// ============================================
+
+/**
+ * Calculate ratio when Token B input changes in increase position section
+ * @async
+ * @returns {Promise<void>}
+ */
+async function getRatioIncreasePositiontokenB() {
+    console.log("running: getRatioIncreasePositiontokenB");
+
+    const walletConnected = getWalletConnected();
+    if (!walletConnected) {
+        await connectWallet();
+    }
+
+    isProgrammaticUpdate = true;
+
+    const tokenALabel = document.querySelector('#increase #tokenALabel');
+    const tokenBLabel = document.querySelector('#increase #tokenBLabel');
+    const tokenAInput = document.querySelector('#increase #tokenAAmount');
+    const tokenBInput = document.querySelector('#increase #tokenBAmount');
+
+    const tokenAValue = tokenALabel.textContent;
+    const tokenBValue = tokenBLabel.textContent;
+
+    console.log("Currently selected value TokenA:", tokenAValue);
+    console.log("Currently selected value TokenB:", tokenBValue);
+
+    const tokenAAmount = tokenAInput ? tokenAInput.value : '0';
+    const tokenBAmount = tokenBInput ? tokenBInput.value : '0';
+
+    console.log("Token A Amount:", tokenAAmount);
+    console.log("Token B Amount:", tokenBAmount);
+
+    const tokenAinputAddress = tokenAddresses[tokenAValue];
+    const tokenBinputAddress = tokenAddresses[tokenBValue];
+
+    const createInputs = document.querySelectorAll('#increase input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    if (!amountInputA || !amountInputB) {
+        console.error("Could not find amount input fields");
+        return;
+    }
+
+    await throttledGetSqrtRtAndPriceRatio();
+
+    const walletBalances = getWalletBalances();
+    const ratioz = getRatioz();
+
+    const result = calculateOptimalAmountsWithTokenBPrioritySTAKESECTIONI(
+        tokenAValue, tokenBValue,
+        tokenAAmount, tokenBAmount,
+        walletBalances, ratioz
+    );
+
+    const { amountToDeposit, amountWith8Decimals0xBTC, needsAdjustment, limitingFactor } = result;
+
+    console.log("calculateOptimalAmounts amountToDeposit:", amountToDeposit);
+    console.log("calculateOptimalAmounts amountWith8Decimals0xBTC:", amountWith8Decimals0xBTC);
+    console.log("calculateOptimalAmounts needsAdjustment:", needsAdjustment);
+    console.log("calculateOptimalAmounts limitingFactor:", limitingFactor);
+
+    try {
+        const amountToDepositBN = ethers.BigNumber.from(amountToDeposit.toString());
+        const amountToDepositBN2 = ethers.BigNumber.from(amountWith8Decimals0xBTC.toString());
+
+        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 18);
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 8);
+        } else {
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+        }
+
+        ratiozToSave = 10000 * amountToDepositBN / amountToDepositBN2;
+
+        if (needsAdjustment) {
+            console.log(`Adjusted amounts B due to ${limitingFactor} being limiting factor`);
+
+            const positionSelect = document.querySelector('#increase select');
+            const selectedPositionId = positionSelect.value;
+            const position = positionData[selectedPositionId];
+            console.log("Position Increase: ", position);
+            if (position) {
+                const label = amountInputB.closest('.form-group').querySelector('label');
+                if (label && label.textContent.includes(position.tokenB)) {
+                    const currentTokenSymbol = position.tokenB;
+                    console.log("Calling handleMaxButtonClick");
+                    handleMaxButtonClick(currentTokenSymbol, amountInputB);
+                }
+            }
+        }
+
+        if (typeof updateTotalLiqIncreaseSTAKING === 'function') {
+            updateTotalLiqIncreaseSTAKING();
+        }
+
+    } catch (error) {
+        console.error(`Error in getRatioIncreasePositiontokenB:`, error);
+    }
+
+    isProgrammaticUpdate = false;
+}
+
+/**
+ * Calculate ratio when Token A input changes in increase position section
+ * @async
+ * @returns {Promise<void>}
+ */
+async function getRatioIncreasePositiontokenA() {
+    console.log("running: getRatioIncreasePositiontokenA");
+
+    const walletConnected = getWalletConnected();
+    if (!walletConnected) {
+        await connectWallet();
+    }
+
+    isProgrammaticUpdate = true;
+
+    const tokenALabel = document.querySelector('#increase #tokenALabel');
+    const tokenBLabel = document.querySelector('#increase #tokenBLabel');
+    const tokenAInput = document.querySelector('#increase #tokenAAmount');
+    const tokenBInput = document.querySelector('#increase #tokenBAmount');
+
+    const tokenAValue = tokenALabel.textContent.trim();
+    const tokenBValue = tokenBLabel.textContent.trim();
+
+    console.log("Currently selected value TokenA:", tokenAValue);
+    console.log("Currently selected value TokenB:", tokenBValue);
+
+    const tokenAAmount = tokenAInput ? tokenAInput.value : '0';
+    const tokenBAmount = tokenBInput ? tokenBInput.value : '0';
+
+    console.log("Token A Amount:", tokenAAmount);
+    console.log("Token B Amount:", tokenBAmount);
+
+    const tokenAinputAddress = tokenAddresses[tokenAValue];
+    const tokenBinputAddress = tokenAddresses[tokenBValue];
+
+    const createInputs = document.querySelectorAll('#increase input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    if (!amountInputA || !amountInputB) {
+        console.error("Could not find amount input fields");
+        return;
+    }
+
+    await throttledGetSqrtRtAndPriceRatio();
+
+    const walletBalances = getWalletBalances();
+    const ratioz = getRatioz();
+
+    const result = calculateOptimalAmountsWithTokenAPriority(
+        tokenAValue, tokenBValue,
+        tokenAAmount, tokenBAmount,
+        walletBalances, ratioz
+    );
+
+    const { amountToDeposit, amountWith8Decimals0xBTC, needsAdjustment, limitingFactor } = result;
+
+    console.log("calculateOptimalAmounts amountToDeposit:", amountToDeposit);
+    console.log("calculateOptimalAmounts amountWith8Decimals0xBTC:", amountWith8Decimals0xBTC.toString());
+    console.log("calculateOptimalAmounts needsAdjustment:", needsAdjustment);
+    console.log("calculateOptimalAmounts limitingFactor:", limitingFactor);
+
+    try {
+        const amountToDepositBN = ethers.BigNumber.from(amountToDeposit.toString());
+        const amountToDepositBN2 = ethers.BigNumber.from(amountWith8Decimals0xBTC.toString());
+
+        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputA.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+            amountInputB.value = ethers.utils.formatUnits(amountToDeposit, 18);
+        } else {
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+        }
+
+        ratiozToSave = 10000 * amountToDepositBN / amountToDepositBN2;
+
+        if (needsAdjustment) {
+            console.log(`Adjusted amounts A due to ${limitingFactor} being limiting factor`);
+
+            const positionSelect = document.querySelector('#increase select');
+            const selectedPositionId = positionSelect.value;
+            const position = positionData[selectedPositionId];
+            console.log("Position Increase: ", position);
+            if (position) {
+                const label = amountInputA.closest('.form-group').querySelector('label');
+                if (label && label.textContent.includes(position.tokenA)) {
+                    const currentTokenSymbol = position.tokenA;
+                    console.log("Calling handleMaxButtonClick");
+                    handleMaxButtonClick(currentTokenSymbol, amountInputA);
+                }
+            }
+        }
+
+        updateTotalLiqIncrease();
+
+    } catch (error) {
+        console.error(`Error in getRatioIncreasePositiontokenA:`, error);
+    }
+
+    isProgrammaticUpdate = false;
+}
+
+// ============================================
+// STAKE INCREASE RATIO FUNCTIONS
+// ============================================
+
+/**
+ * Calculate ratio when Token B input changes in stake increase section
+ * @async
+ * @returns {Promise<void>}
+ */
+async function getRatioStakeIncreasePositiontokenB() {
+    console.log("running: getRatioStakeIncreasePositiontokenB");
+
+    const walletConnected = getWalletConnected();
+    if (!walletConnected) {
+        await connectWallet();
+    }
+
+    isProgrammaticUpdate = true;
+
+    const tokenALabel = document.querySelector('#stake-increase #tokenALabelINC');
+    const tokenBLabel = document.querySelector('#stake-increase #tokenBLabelINC');
+    const tokenAInput = document.querySelector('#stake-increase #tokenAAmount');
+    const tokenBInput = document.querySelector('#stake-increase #tokenBAmount');
+
+    const tokenAValue = tokenALabel.textContent;
+    const tokenBValue = tokenBLabel.textContent;
+
+    console.log("Currently selected value TokenA:", tokenAValue);
+    console.log("Currently selected value TokenB:", tokenBValue);
+
+    const tokenAAmount = tokenAInput ? tokenAInput.value : '0';
+    const tokenBAmount = tokenBInput ? tokenBInput.value : '0';
+
+    console.log("Token A Amount:", tokenAAmount);
+    console.log("Token B Amount:", tokenBAmount);
+
+    const tokenAinputAddress = tokenAddresses[tokenAValue];
+    const tokenBinputAddress = tokenAddresses[tokenBValue];
+
+    const createInputs = document.querySelectorAll('#stake-increase input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    if (!amountInputA || !amountInputB) {
+        console.error("Could not find amount input fields");
+        return;
+    }
+
+    await throttledGetSqrtRtAndPriceRatio();
+
+    const walletBalances = getWalletBalances();
+    const ratioz = getRatioz();
+
+    const result = calculateOptimalAmountsWithTokenBPrioritySTAKESECTIONI(
+        tokenAValue, tokenBValue,
+        tokenAAmount, tokenBAmount,
+        walletBalances, ratioz
+    );
+
+    const { amountToDeposit, amountWith8Decimals0xBTC, needsAdjustment, limitingFactor } = result;
+
+    console.log("calculateOptimalAmounts amountToDeposit:", amountToDeposit);
+    console.log("calculateOptimalAmounts amountWith8Decimals0xBTC:", amountWith8Decimals0xBTC);
+    console.log("calculateOptimalAmounts needsAdjustment:", needsAdjustment);
+    console.log("calculateOptimalAmounts limitingFactor:", limitingFactor);
+
+    try {
+        const amountToDepositBN = ethers.BigNumber.from(amountToDeposit.toString());
+        const amountToDepositBN2 = ethers.BigNumber.from(amountWith8Decimals0xBTC.toString());
+
+        if (tokenBinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+        } else {
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+        }
+
+        ratiozToSave = 10000 * amountToDepositBN / amountToDepositBN2;
+
+        if (needsAdjustment) {
+            console.log(`Adjusted amounts due to ${limitingFactor} being limiting factor`);
+
+            const positionSelect = document.querySelector('#stake-increase select');
+            const selectedPositionId = positionSelect.value;
+            const position = stakingPositionData[selectedPositionId];
+            console.log("Position Stake Increase: ", position);
+            if (position) {
+                const label = amountInputB.closest('.form-group').querySelector('label');
+                if (label && label.textContent.includes(position.tokenB)) {
+                    const currentTokenSymbol = position.tokenB;
+                    console.log("Worked");
+                    handleMaxButtonClickStakeIncrease(currentTokenSymbol, amountInputB);
+                }
+            }
+        }
+
+        if (typeof updateTotalLiqIncreaseSTAKING === 'function') {
+            updateTotalLiqIncreaseSTAKING();
+        }
+
+    } catch (error) {
+        console.error(`Error in getRatioStakeIncreasePositiontokenB:`, error);
+    }
+
+    isProgrammaticUpdate = false;
+}
+
+/**
+ * Calculate ratio when Token A input changes in stake increase section
+ * @async
+ * @returns {Promise<void>}
+ */
+async function getRatioStakeIncreasePositiontokenA() {
+    console.log("running: getRatioStakeIncreasePositiontokenA");
+
+    const walletConnected = getWalletConnected();
+    if (!walletConnected) {
+        await connectWallet();
+    }
+
+    isProgrammaticUpdate = true;
+
+    const tokenALabel = document.querySelector('#stake-increase #tokenALabelINC');
+    const tokenBLabel = document.querySelector('#stake-increase #tokenBLabelINC');
+    const tokenAInput = document.querySelector('#stake-increase #tokenAAmount');
+    const tokenBInput = document.querySelector('#stake-increase #tokenBAmount');
+
+    const tokenAValue = tokenALabel.textContent;
+    const tokenBValue = tokenBLabel.textContent;
+
+    console.log("Currently selected value TokenA:", tokenAValue);
+    console.log("Currently selected value TokenB:", tokenBValue);
+
+    const tokenAAmount = tokenAInput ? tokenAInput.value : '0';
+    const tokenBAmount = tokenBInput ? tokenBInput.value : '0';
+
+    console.log("Token A Amount:", tokenAAmount);
+    console.log("Token B Amount:", tokenBAmount);
+
+    const tokenAinputAddress = tokenAddresses[tokenAValue];
+    const tokenBinputAddress = tokenAddresses[tokenBValue];
+
+    const createInputs = document.querySelectorAll('#stake-increase input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    if (!amountInputA || !amountInputB) {
+        console.error("Could not find amount input fields");
+        return;
+    }
+
+    await throttledGetSqrtRtAndPriceRatio();
+
+    const walletBalances = getWalletBalances();
+    const ratioz = getRatioz();
+
+    const result = calculateOptimalAmountsWithTokenAPrioritySTAKESECTIONI(
+        tokenAValue, tokenBValue,
+        tokenAAmount, tokenBAmount,
+        walletBalances, ratioz
+    );
+
+    const { amountToDeposit, amountWith8Decimals0xBTC, needsAdjustment, limitingFactor } = result;
+
+    console.log("calculateOptimalAmounts amountToDeposit:", amountToDeposit);
+    console.log("calculateOptimalAmounts amountWith8Decimals0xBTC:", amountWith8Decimals0xBTC);
+    console.log("calculateOptimalAmounts needsAdjustment:", needsAdjustment);
+    console.log("calculateOptimalAmounts limitingFactor:", limitingFactor);
+
+    try {
+        const amountToDepositBN = ethers.BigNumber.from(amountToDeposit.toString());
+        const amountToDepositBN2 = ethers.BigNumber.from(amountWith8Decimals0xBTC.toString());
+
+        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputB.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputA.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+        } else {
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+        }
+
+        ratiozToSave = 10000 * amountToDepositBN / amountToDepositBN2;
+
+        if (needsAdjustment) {
+            console.log(`Adjusted amounts due to ${limitingFactor} being limiting factor`);
+
+            const positionSelect = document.querySelector('#stake-increase select');
+            const selectedPositionId = positionSelect.value;
+            const position = stakingPositionData[selectedPositionId];
+            console.log("Position Stake Increase: ", position);
+            if (position) {
+                const label = amountInputA.closest('.form-group').querySelector('label');
+                if (label && label.textContent.includes(position.tokenB)) {
+                    const currentTokenSymbol = position.tokenB;
+                    console.log("Worked");
+                    handleMaxButtonClickStakeIncrease(currentTokenSymbol, amountInputB);
+                }
+            }
+        }
+
+        if (typeof updateTotalLiqIncreaseSTAKING === 'function') {
+            updateTotalLiqIncreaseSTAKING();
+        }
+
+    } catch (error) {
+        console.error(`Error in getRatioStakeIncreasePositiontokenA:`, error);
+    }
+
+    isProgrammaticUpdate = false;
+}
+
+// ============================================
+// MAX CREATE POSITION FUNCTION
+// ============================================
+
+/**
+ * Get maximum amounts for create position based on wallet balances
+ * Calculates optimal token amounts and updates input fields
+ * @returns {Promise<void>}
+ */
+export async function getMaxCreatePosition() {
+    const maxCreatedWhen = Date.now(); // Save current timestamp in milliseconds
+
+    if (!getWalletConnected()) {
+        await connectWallet();
+    }
+
+    const tokenASelect = document.querySelector('#create .form-group:nth-child(1) select');
+    const tokenBSelect = document.querySelector('#create .form-group:nth-child(2) select');
+
+    // Get the currently selected values
+    const tokenAValue = tokenASelect.value;
+    const tokenBvalue = tokenBSelect.value;
+    console.log("Currently selected value TokenA:", tokenAValue);
+    console.log("Currently selected value TokenB:", tokenBvalue);
+
+    // Get the selected option elements
+    const selectedOptionA = tokenASelect.options[tokenASelect.selectedIndex];
+    const selectedOptionB = tokenBSelect.options[tokenBSelect.selectedIndex];
+    console.log("selectedOptionA option text:", selectedOptionA.text);
+    console.log("selectedOptionA option value:", selectedOptionA.value);
+    console.log("selectedOptionB option text:", selectedOptionB.text);
+    console.log("selectedOptionB option value:", selectedOptionB.value);
+
+    var tokenAinputAddress = tokenAddresses[selectedOptionA.value];
+    var tokenBinputAddress = tokenAddresses[selectedOptionB.value];
+    console.log("tokenA InputAddresstoken", tokenAinputAddress);
+    console.log("tokenB InputAddresstoken", tokenBinputAddress);
+
+    // Simple and reliable approach - select all number inputs in create page
+    const createInputs = document.querySelectorAll('#create input[type="number"]');
+    const amountInputA = createInputs[0]; // First number input (Amount A)
+    const amountInputB = createInputs[1]; // Second number input (Amount B)
+
+    // Add null checks to prevent errors
+    if (!amountInputA || !amountInputB) {
+        console.error("Could not find amount input fields");
+        return;
+    }
+
+    // Get the currently selected values
+    const tokenAInput = amountInputA.value;
+    const tokenBInput = amountInputB.value;
+
+    console.log("Currently amountInputA value:", tokenAInput);
+    console.log("Currently amountInputB value:", tokenBInput);
+
+    const walletBalances = getWalletBalances();
+    var amountAtoCreate = 0;
+
+    if (selectedOptionA.value == "0xBTC") {
+        console.log("LOGGED 0xBTC selected A Value, getMaxCreate");
+        amountAtoCreate = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+    } else {
+        amountAtoCreate = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+    }
+
+    var amountBtoCreate = 0;
+
+    if (selectedOptionB.value == "0xBTC") {
+        console.log("LOGGED 0xBTC selected B Value, getMaxCreate");
+        amountBtoCreate = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+    } else {
+        amountBtoCreate = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+    }
+
+    let amountOut = 0;
+    await throttledGetSqrtRtAndPriceRatio();
+
+    let amountToDeposit = ethers.utils.parseEther("200");  // 200 * 10^18 for B0x token
+    var amountToDepositOfZer0X = ethers.utils.parseUnits("100", 8); // 0.01 * 10^8 for 0xBTC
+    var amountWith8Decimals0xBTC = 0n;
+    let liquiditySalt = 0;
+
+    const ratioz = getRatioz();
+
+    if (tokenAinputAddress == Address_ZEROXBTC_TESTNETCONTRACT) {
+        // TokenB is 0xBTC, calculate how much TokenA (B0x) is needed
+        console.log("TokenA is 0xBTC, calculating TokenB amount");
+
+        const calculatedPriceRatio = BigInt(ratioz);
+        var priceIn18Decimals = 0n;
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) > BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            // INVERTED: Use division instead of multiplication
+            priceIn18Decimals = (10n ** 36n) / (calculatedPriceRatio * (10n ** 10n)); // Invert the ratio
+            const amountZer0XIn18Decimals = BigInt(amountAtoCreate) * 10n ** 10n;
+            amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+            console.log("0xBTC bigger than b0x.  b0x smaller than 0xBTC");
+        } else {
+            // 0xBTC > B0x: Use direct multiplication instead of complex inversion
+            const amountZer0XIn18Decimals = BigInt(amountAtoCreate) * 10n ** 10n;
+            priceIn18Decimals = calculatedPriceRatio / (10n ** 10n); // Convert 29 decimals to 18 decimals (29-18=11)
+            amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n); // Standard division
+            console.log("B0x bigger than 0xBTC. 0xBTC smaller than B0x");
+        }
+
+        amountWith8Decimals0xBTC = amountAtoCreate;
+
+        console.log(`fTokenA (0xBTC) amount: ${ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8)}`);
+        console.log(`fCalculated TokenB (B0x) amount: ${ethers.utils.formatEther(amountToDeposit)}`);
+
+    } else {
+        // Start with b0x amount (this could be user input or calculated value)
+        var amountB0x = BigInt(amountAtoCreate); // Your b0x input
+        console.log("Amount B0x input: ", amountB0x.toString());
+        const priceRatio2 = BigInt(ratioz);
+        console.log(`priceRatio: ${priceRatio2}`);
+
+        // Apply the same address comparison logic for ratio handling
+        var adjustedPriceRatio = 0n;
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) > BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            adjustedPriceRatio = (10n ** 36n) / (priceRatio2 * (10n ** 10n)); // Invert the ratio
+            amountAtoCreate = (amountB0x * (10n ** 18n)) / adjustedPriceRatio / (10n ** 10n); // Divide by 10^10 to convert from 18 to 8 decimals
+
+            console.log("22 0xBTC bigger than b0x.  b0x smaller than 0xBTC");
+        } else {
+            const b0xInput = BigInt(amountAtoCreate); // Your B0x input
+            const priceRatio = BigInt(ratioz);
+
+            console.log("22 B0x bigger than 0xBTC. 0xBTC smaller than B0x");
+            console.log(`B0x input: ${b0xInput}`);
+            console.log(`Price ratio: ${priceRatio}`);
+
+            // Calculate 0xBTC needed from B0x amount
+            // Formula: 0xBTC = B0x / price_ratio
+            // Since priceRatio is in 29 decimals, and B0x is in 18 decimals
+            amountB0x = (b0xInput * 10n ** 28n) / priceRatio / 10n ** 10n; // Convert to 8 decimals for 0xBTC
+
+            // Keep the original B0x amount
+            amountAtoCreate = b0xInput;
+
+            console.log(`Calculated 0xBTC: ${amountB0x}`);
+            console.log(`Original B0x: ${amountAtoCreate}`);
+
+            var temp = amountB0x;
+            amountB0x = amountAtoCreate;
+            amountAtoCreate = temp;
+        }
+
+        console.log(`Adjusted Price ratio: ${adjustedPriceRatio}`);
+        console.log(`Estimated Deposit 0xBTC amount: ${amountAtoCreate}`);
+        console.log(`Estimated Deposit B0x amount: ${amountB0x}`);
+        console.log(`Estimated Deposit 0xBTC amount: ${ethers.utils.formatUnits(amountAtoCreate, 8)}`);
+        console.log(`Estimated Deposit B0x amount: ${ethers.utils.formatEther(amountB0x)}`);
+        amountToDeposit = amountB0x;
+        amountWith8Decimals0xBTC = amountAtoCreate;
+    }
+
+    console.log("walletBalances: ", walletBalances['0xBTC']);
+    var zeroxbtcdecimal = amountWith8Decimals0xBTC.toString();
+    var wallet_zeroxbtc = ethers.utils.parseUnits(walletBalances['0xBTC'], 8).toString();
+    console.log("amountWith8Decimals0xBTC: ", zeroxbtcdecimal);
+    console.log("wallet_zeroxbtc: ", wallet_zeroxbtc);
+    const calculatedPriceRatio = BigInt(ratioz);
+
+    if (parseFloat(zeroxbtcdecimal) > parseFloat(wallet_zeroxbtc)) {
+        console.log("too much 0xbtc u dont have lower it!.");
+
+        // If you're starting with 0xBTC amount and want to calculate B0x needed:
+        amountWith8Decimals0xBTC = BigInt(wallet_zeroxbtc); // 0xBTC amount (8 decimals)
+
+        console.log("Amount 0xBTC to use: ", amountWith8Decimals0xBTC.toString());
+        const priceRatio = BigInt(ratioz);
+        console.log(`priceRatio: ${priceRatio}`);
+
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) > BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            // INVERTED: Use division instead of multiplication
+            priceIn18Decimals = (10n ** 36n) / (calculatedPriceRatio * (10n ** 10n)); // Invert the ratio
+            const amountZer0XIn18Decimals = BigInt(amountWith8Decimals0xBTC) * 10n ** 10n;
+            amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+            console.log("0xBTC bigger than b0x.  b0x smaller than 0xBTC");
+        } else {
+            // 0xBTC > B0x: Use direct multiplication instead of complex inversion
+            const amountZer0XIn18Decimals = BigInt(amountWith8Decimals0xBTC) * 10n ** 10n;
+            priceIn18Decimals = calculatedPriceRatio / (10n ** 10n); // Convert 29 decimals to 18 decimals (29-18=11)
+            amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n); // Standard division
+            console.log("B0x bigger than 0xBTC. 0xBTC smaller than B0x");
+        }
+    }
+
+    var b0xdecimal = amountToDeposit.toString();
+    var wallet_b0x = ethers.utils.parseUnits(walletBalances['B0x'], 18).toString();
+    console.log("amountWith b0xdecimal:  ", b0xdecimal);
+    console.log("wallet_b0x: ", wallet_b0x);
+
+    if (parseFloat(b0xdecimal) > parseFloat(wallet_b0x)) {
+        console.log("too much b0x u dont have lower it!.");
+        console.log(`Found valid Ratio: ${ratioz.toString()}`);
+        console.log("Using available B0x balance to calculate 0xBTC needed");
+
+        // Start with available B0x amount (18 decimals)
+        amountToDeposit = BigInt(wallet_b0x); // B0x amount (18 decimals)
+        console.log("Available B0x amount to use: ", amountToDeposit.toString());
+
+        const priceRatio = BigInt(ratioz);
+        console.log(`priceRatio: ${priceRatio}`);
+
+        var amountB0x = amountToDeposit; // Your b0x input
+        console.log("Amount B0x input: ", amountB0x.toString());
+        const priceRatio2 = BigInt(ratioz);
+        console.log(`priceRatio: ${priceRatio2}`);
+
+        // Apply the same address comparison logic for ratio handling
+        var adjustedPriceRatio = 0n;
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) > BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            adjustedPriceRatio = (10n ** 36n) / (priceRatio2 * (10n ** 10n)); // Invert the ratio
+            amountAtoCreate = (amountB0x * (10n ** 18n)) / adjustedPriceRatio / (10n ** 10n); // Divide by 10^10 to convert from 18 to 8 decimals
+
+            console.log("22 0xBTC bigger than b0x.  b0x smaller than 0xBTC");
+
+            amountWith8Decimals0xBTC = amountAtoCreate;
+
+        } else {
+            const b0xInput = BigInt(wallet_b0x); // Your B0x input
+            const priceRatio = BigInt(ratioz);
+
+            console.log("22 B0x bigger than 0xBTC. 0xBTC smaller than B0x");
+            console.log(`B0x input: ${b0xInput}`);
+            console.log(`Price ratio: ${priceRatio}`);
+
+            // Calculate 0xBTC needed from B0x amount
+            // Formula: 0xBTC = B0x / price_ratio
+            // Since priceRatio is in 29 decimals, and B0x is in 18 decimals
+            amountB0x = (b0xInput * 10n ** 28n) / priceRatio / 10n ** 10n; // Convert to 8 decimals for 0xBTC
+
+            // Keep the original B0x amount
+            amountAtoCreate = b0xInput;
+
+            console.log(`Calculated 0xBTC: ${amountB0x}`);
+            console.log(`Original B0x: ${amountAtoCreate}`);
+
+            amountWith8Decimals0xBTC = amountB0x;
+        }
+
+        console.log(`Estimated Deposit B0x amount: ${ethers.utils.formatEther(amountToDeposit)}`);
+        console.log(`Estimated Deposit 0xBTC amount: ${ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8)}`);
+        console.log(`B0x amount raw: ${amountToDeposit}`);
+        console.log(`0xBTC amount raw: ${amountWith8Decimals0xBTC}`);
+    }
+
+    const amountToDepositBN = ethers.BigNumber.from(amountToDeposit.toString());
+    const amountToDepositBN2 = ethers.BigNumber.from(amountWith8Decimals0xBTC.toString());
+
+    try {
+        console.log("tokenAddress: ", tokenAddress);
+        console.log("Address_ZEROXBTC_TESTNETCONTRACT: ", Address_ZEROXBTC_TESTNETCONTRACT.toString());
+        console.log("amountToDepositBN: ", amountToDepositBN.toString());
+        console.log("amountToDepositBN2: ", amountToDepositBN2.toString());
+        console.log("Current_getsqrtPricex96: ", getCurrentSqrtPricex96().toString());
+        console.log("HookAddress: ", HookAddress.toString());
+
+        if (tokenAinputAddress == Address_ZEROXBTC_TESTNETCONTRACT) {
+            console.log("Check this out: ");
+            console.log("Check this out amountToDeposit: ", amountToDeposit);
+            console.log("Check this out amountWith8Decimals0xBTC: ", amountWith8Decimals0xBTC);
+            amountInputB.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputA.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+            console.log("THISRIGHT HUR");
+            ratiozToSave = 10 ** 16 * amountInputB.value / amountInputA.value;
+        } else {
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            ratiozToSave = 10 ** 16 / amountInputB.value / amountInputA.value;
+        }
+
+    } catch (error) {
+        console.error(`Error in getMaxCreatePosition:`, error);
+    }
+}
+
+// ============================================
+// WINDOW EXPORTS (for compatibility)
+// ============================================
+
+// Export to window object for compatibility with init.js
+window.getRatioCreatePositiontokenA = getRatioCreatePositiontokenA;
+window.getRatioCreatePositiontokenB = getRatioCreatePositiontokenB;
+window.getRatioIncreasePositiontokenA = getRatioIncreasePositiontokenA;
+window.getRatioIncreasePositiontokenB = getRatioIncreasePositiontokenB;
+window.getRatioStakeIncreasePositiontokenA = getRatioStakeIncreasePositiontokenA;
+window.getRatioStakeIncreasePositiontokenB = getRatioStakeIncreasePositiontokenB;
+window.getMaxCreatePosition = getMaxCreatePosition;
+
+// ============================================
+// ES6 EXPORTS
+// ============================================
+
+export {
+    getRatioCreatePositiontokenA,
+    getRatioCreatePositiontokenB,
+    getRatioIncreasePositiontokenA,
+    getRatioIncreasePositiontokenB,
+    getRatioStakeIncreasePositiontokenA,
+    getRatioStakeIncreasePositiontokenB,
+    handleMaxButtonClick,
+    handleMaxButtonClickStakeIncrease,
+};
+
+console.log('Positions-ratio module loaded');
