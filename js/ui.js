@@ -429,8 +429,14 @@ export async function switchTab(tabName) {
         }
     } else if (tabName === 'staking-management' || tabName === 'staking-main-page') {
         // Load staking data when switching to staking tabs
-        if (window.walletConnected && typeof window.getTokenIDsOwnedByMetamask === 'function') {
-            await window.getTokenIDsOwnedByMetamask();
+        if (window.walletConnected) {
+            // Fetch reward stats (includes user's current rewards)
+            if (typeof window.getRewardStats === 'function') {
+                await window.getRewardStats();
+            }
+            if (typeof window.getTokenIDsOwnedByMetamask === 'function') {
+                await window.getTokenIDsOwnedByMetamask();
+            }
         }
         if (typeof window.updateStakingStats === 'function') {
             window.updateStakingStats();
@@ -438,6 +444,39 @@ export async function switchTab(tabName) {
         // Update staking values from stored amounts
         if (typeof window.updateStakingValuesFromStored === 'function') {
             window.updateStakingValuesFromStored();
+        }
+    } else if (tabName === 'stake-increase' || tabName === 'stake-decrease') {
+        // Load staking position data when switching to stake increase/decrease tabs
+        if (window.walletConnected) {
+            // Fetch wallet balances if not already loaded
+            if (!window.walletBalances || !window.walletBalances['0xBTC']) {
+                if (typeof window.fetchBalances === 'function') {
+                    await window.fetchBalances(
+                        window.userAddress,
+                        window.tokenAddresses,
+                        window.tokenAddressesDecimals,
+                        window.fetchTokenBalanceWithEthers,
+                        window.displayWalletBalances,
+                        window.provider,
+                        window.signer,
+                        window.walletConnected,
+                        window.connectWallet
+                    );
+                }
+            }
+            if (typeof window.getTokenIDsOwnedByMetamask === 'function') {
+                await window.getTokenIDsOwnedByMetamask();
+            }
+            if (typeof window.loadPositionsIntoDappSelections === 'function') {
+                await window.loadPositionsIntoDappSelections();
+            }
+            // Update the position info displays
+            if (tabName === 'stake-increase' && typeof window.updateStakePositionInfo === 'function') {
+                window.updateStakePositionInfo();
+            }
+            if (tabName === 'stake-decrease' && typeof window.updateStakeDecreasePositionInfo === 'function') {
+                window.updateStakeDecreasePositionInfo();
+            }
         }
     } else if (tabName === 'liquidity-positions') {
         // Load position data when switching to positions tab

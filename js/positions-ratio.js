@@ -29,7 +29,7 @@ const tokenAddress = tokenAddresses['B0x'];
 
 // These need to be accessed from window object since they're set globally
 const getWalletConnected = () => window.walletConnected;
-const getWalletBalances = () => window.walletBalances;
+const getWalletBalances = () => window.walletBalances || {};
 const getRatioz = () => window.ratioz;
 const getCurrentSqrtPricex96 = () => window.Current_getsqrtPricex96;
 
@@ -615,6 +615,18 @@ function calculateOptimalAmountsWithTokenBPrioritySTAKESECTIONI(tokenAValue, tok
  * @returns {Object} Final amounts with limiting factor information
  */
 export function getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, requestedMaxToken, position = null, useFeesz) {
+    // Check if walletBalances is valid before proceeding
+    if (!walletBalances || !walletBalances['0xBTC'] || !walletBalances['B0x']) {
+        console.warn("getMaxAmountsWithProperLimiting: wallet balances not yet loaded");
+        return {
+            amountWith8Decimals0xBTC: 0n,
+            amountToDeposit: 0n,
+            actualLimitingFactor: 'none',
+            requestFulfilled: false,
+            reason: 'Wallet balances not yet loaded. Please wait.'
+        };
+    }
+
     // Check if ratioz is valid before proceeding
     if (!ratioz || ratioz.toString() === '0' || BigInt(ratioz.toString()) === 0n) {
         console.warn("getMaxAmountsWithProperLimiting: ratioz is 0 or undefined, cannot calculate amounts");

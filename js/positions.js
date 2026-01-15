@@ -40,6 +40,14 @@ export let totalStakedAmounts = {
     token1Symbol: ''
 };
 
+// Reset total staked amounts (used when switching accounts)
+export function resetTotalStakedAmounts() {
+    totalStakedAmounts.token0 = '0';
+    totalStakedAmounts.token1 = '0';
+    totalStakedAmounts.token0Symbol = '';
+    totalStakedAmounts.token1Symbol = '';
+}
+
 // Position selection tracking variables
 let userManualSelection = null;
 let userManualSelectionIncrease = null;
@@ -822,10 +830,12 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
 
         // Update the staking values in the UI
         updateStakingValues([formattedTokenAWithDecimals, formattedTokenBWithDecimals], apy);
-    }else{
+    } else {
+        // No staked positions - reset amounts to 0
+        totalStakedAmounts.token0 = '0';
+        totalStakedAmounts.token1 = '0';
         const apy = (window.APYFINAL || 0).toFixed(2);
-                updateStakingValues([0, 0], apy);
-
+        updateStakingValues([0, 0], apy);
     }
 
     hideLoadingWidget();
@@ -1701,13 +1711,14 @@ export async function loadPositionsIntoDappSelections() {
     }
 
     // Stake increase position selector (uses stakingPositionData)
+    // Reversed order so newest positions appear first (to reset largest penalty first)
     const stakeIncreaseSelect = document.querySelector('#stake-increase select');
     if (stakeIncreaseSelect) {
         const currentIncreaseValue = stakeIncreaseSelect.value;
         stakeIncreaseSelect.innerHTML = '';
 
         if (Object.keys(stakingPositionData).length > 0) {
-            Object.values(stakingPositionData).forEach(position => {
+            Object.values(stakingPositionData).reverse().forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
                 option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;

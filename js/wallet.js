@@ -9,7 +9,7 @@ import {
     defaultRPC_Base,
     defaultRPC_ETH,
 } from './config.js';
-import {totalStakedAmounts} from './positions.js';
+import {totalStakedAmounts, resetTotalStakedAmounts} from './positions.js';
 import {updateStakingValues} from './staking.js';
 import { showErrorNotification } from './ui.js';
 
@@ -718,6 +718,12 @@ export async function setupWalletListeners() {
             }
             if (window.resetPositionSearch) {
                 window.resetPositionSearch();
+            }
+
+            // Reset staked amounts and show loading state
+            resetTotalStakedAmounts();
+            if (window.updateStakingStats) {
+                window.updateStakingStats(); // This will show "Loading..."
             }
 
             // Fetch balances for new account

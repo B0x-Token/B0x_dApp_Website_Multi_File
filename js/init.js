@@ -447,10 +447,11 @@ export function setupDOMListeners() {
     }
 
     // Stake increase position selector
+    // Reversed order so newest positions appear first (to reset largest penalty first)
     const stakePositionSelect = document.querySelector('#stake-increase select');
     if (stakePositionSelect) {
         stakePositionSelect.innerHTML = '';
-        Object.values(stakingPositionData).forEach(position => {
+        Object.values(stakingPositionData).reverse().forEach(position => {
             const option = document.createElement('option');
             option.value = position.id;
             option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;

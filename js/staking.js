@@ -237,12 +237,12 @@ export function updateStakingStats() {
 
     let statsHTML = `
         <div class="stat-card">
-            <div class="stat-value" id="totalStaked0">0 ${token0Name}</div>
-            <div class="stat-value" id="totalStaked1">0 ${token1Name}</div>
+            <div class="stat-value" id="totalStaked0">Loading...</div>
+            <div class="stat-value" id="totalStaked1">Loading...</div>
             <div class="stat-label">Your Total Staked</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value" id="APYPercentage">0%</div>
+            <div class="stat-value" id="APYPercentage">Loading...</div>
             <div class="stat-label">Your Current APY</div>
         </div>
     `;

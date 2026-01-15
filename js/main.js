@@ -457,6 +457,7 @@ window.populateStakingManagementData = Staking.populateStakingManagementData;
 // Positions module
 window.getTokenIDsOwnedByMetamask = Positions.getTokenIDsOwnedByMetamask;
 window.updateStakingValuesFromStored = Positions.updateStakingValuesFromStored;
+window.resetTotalStakedAmounts = Positions.resetTotalStakedAmounts;
 window.getAllPositionsData = Positions.getAllPositionsData;
 window.increaseLiquidity = Positions.increaseLiquidity;
 window.decreaseLiquidity = Positions.decreaseLiquidity;
@@ -547,10 +548,8 @@ window.getCreatePosition = async function() {
 };
 
 window.depositNFTStake = Staking.depositNFTStake;
-window.withdrawStake = async function() {
-    console.log('Withdraw stake functionality pending migration');
-    UI.showInfoNotification('Withdraw Stake', 'Withdraw functionality is being migrated');
-};
+window.withdrawStake = Staking.withdrawNFTStake;
+window.withdrawNFTStake = Staking.withdrawNFTStake;
 window.collectRewards = Staking.collectRewards;
 
 // Admin module
