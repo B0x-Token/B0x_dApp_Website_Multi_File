@@ -152,12 +152,17 @@ export async function getAllPoolFees() {
         tickSpacing: 60,
         hooks: hookAddress
     };
-
+console.log("Currency 0 fee: ", R0xBTC0xbtcCurrency0);
+console.log("Currency 1 fee: ", R0xBTC0xbtcCurrency1);
     // Encode call data for each pool
     const callData1 = hookInterface.encodeFunctionData("getCurrentPoolFee", [poolKeyB0xETH]);
     const callData2 = hookInterface.encodeFunctionData("getCurrentPoolFee", [poolKey0xBTCETH]);
     const callData3 = hookInterface.encodeFunctionData("getCurrentPoolFee", [poolKeyB0x0xBTC]);
     const callData4 = hookInterface.encodeFunctionData("getCurrentPoolFee", [poolKeyR0xBTC0xBTC]);
+      console.log("F2 poolKey:", poolKeyR0xBTC0xBTC);
+  console.log("F2 hookAddress used:", hookAddress);
+
+  console.log("F2 callData4:", callData4);
 
     // Prepare multicall calls array
     const calls = [
@@ -204,6 +209,8 @@ export async function getAllPoolFees() {
         } else {
             console.error("Failed to fetch B0x/0xBTC fee");
         }
+  console.log("R0xBTC0xBTC call success:", results[3].success);
+  console.log("R0xBTC0xBTC returnData:", results[3].returnData);
 
         // Decode result 4 - R0xBTC/0xBTC
         if (results[3].success) {
@@ -322,7 +329,7 @@ export async function getAllFees() {
 
     const link0xBTCETHz = "https://app.uniswap.org/positions/create/v4?currencyA=0xc4d4fd4f4459730d176844c170f2bb323c87eb3b&currencyB=NATIVE&chain=base&hook=0x785319f8fCE23Cd733DE94Fd7f34b74A5cAa1000&priceRangeState={%22priceInverted%22:false,%22fullRange%22:true,%22minPrice%22:%22%22,%22maxPrice%22:%22%22,%22initialPrice%22:%22%22}&depositState={%22exactField%22:%22TOKEN0%22,%22exactAmounts%22:{}}&fee={%22feeAmount%22:" + poolsfee.oxbtcEth + ",%22tickSpacing%22:60,%22isDynamic%22:true}&step=1";
 
-    const linkR0xBTC0xBTCz = "https://app.uniswap.org/positions/create?currencyA=0xc4d4fd4f4459730d176844c170f2bb323c87eb3b&currencyB=0x29cEFeeEDbb8448c8B483A3A036bc563345efc69&chain=base&hook=0x785319f8fCE23Cd733DE94Fd7f34b74A5cAa1000&priceRangeState={%22priceInverted%22:false,%22fullRange%22:false,%22minPrice%22:%22%22,%22maxPrice%22:%22%22,%22initialPrice%22:%22%22,%22inputMode%22:%22price%22}&depositState={%22exactField%22:%22TOKEN0%22,%22exactAmounts%22:{}}&fee={%22feeAmount%22:" + poolsfee.R0xBTC0xBTC + ",%22tickSpacing%22:60,%22isDynamic%22:true}&step=1";
+    const linkR0xBTC0xBTCz = "https://app.uniswap.org/positions/create/v4?currencyA=0xc4d4fd4f4459730d176844c170f2bb323c87eb3b&currencyB=0x2ffa14b113b0a598b07af6714f42dd75bddffd3e&chain=base&hook=0x785319f8fCE23Cd733DE94Fd7f34b74A5cAa1000&priceRangeState={%22priceInverted%22:false,%22fullRange%22:true,%22minPrice%22:%22%22,%22maxPrice%22:%22%22,%22initialPrice%22:%22%22}&depositState={%22exactField%22:%22TOKEN0%22,%22exactAmounts%22:{}}&fee={%22feeAmount%22:" + poolsfee.R0xBTC0xBTC + ",%22tickSpacing%22:60,%22isDynamic%22:true}&step=1";
 
     // Update link elements
     const linkB0xETH = document.getElementById('uniswap-linkB0xETH');

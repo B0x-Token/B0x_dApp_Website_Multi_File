@@ -174,7 +174,7 @@ const tokenAddresses = {
 'B0x': '0x6B19E31C1813cD00b0d47d798601414b79A3e8AD',
 '0xBTC': '0xc4D4FD4F4459730d176844c170F2bB323c87Eb3B',
 'WETH': '0x4200000000000000000000000000000000000006',
-'RightsTo0xBTC': '0x2ffa14b113b0a598b07af6714f42dd75bddffd3e', //temp until mainnet fill in with actual token on launch
+'RightsTo0xBTC': '0x2ffa14b113b0a598b07af6714f42dd75bddffd3e',
 'USDC': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', //mainnet base USDC
 };
 
@@ -185,7 +185,7 @@ const tokenAddresses = {
         "0x0000000000000000000000000000000000000000": "ETH",
         "0x6B19E31C1813cD00b0d47d798601414b79A3e8AD": "B0x",
         "0xc4D4FD4F4459730d176844c170F2bB323c87Eb3B": "0xBTC",
-        "0x2ffa14b113b0a598b07af6714f42dd75bddffd3e": "RightsTo0xBTC",  //temp until mainnet fill in with actual token on launch
+        "0x2ffa14b113b0a598b07af6714f42dd75bddffd3e": "RightsTo0xBTC",
         "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": "USDC", //mainnet base USDC
         // Add more token mappings as needed
     };

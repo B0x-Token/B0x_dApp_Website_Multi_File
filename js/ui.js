@@ -2724,7 +2724,44 @@ export async function updateStatsDisplay(stats) {
         const currentEraEl = document.querySelector('.stat-value-currentEra');
         if (currentEraEl && stats.rewardEra) {
             const era = parseInt(stats.rewardEra);
-            currentEraEl.innerHTML = `${era.toLocaleString()} <span class="detail">/ 55 (next era: calculating...)</span>`;
+
+            // Calculate time to next era using same logic as Remaining Supply
+            let nextEraTime = 'calculating...';
+            if (stats.maxSupplyForEra && stats.tokensMinted) {
+                const maxSupply = parseFloat(stats.maxSupplyForEra) / 1e18;
+                const minted = parseFloat(stats.tokensMinted) / 1e18;
+                const remaining = maxSupply - minted;
+
+                const currentReward = stats.inflationMined?.rewardsAtTime
+                    ? parseFloat(stats.inflationMined.rewardsAtTime) / 1e18
+                    : 50;
+                const blocksRemaining = Math.floor(remaining / currentReward);
+
+                const avgRewardTimeSeconds = stats.inflationMined?.timePerEpoch
+                    ? parseFloat(stats.inflationMined.timePerEpoch)
+                    : 600;
+                const avgRewardTimeMinutes = avgRewardTimeSeconds / 60;
+
+                const totalMinutes = blocksRemaining * avgRewardTimeMinutes;
+                const totalHours = totalMinutes / 60;
+                const totalDays = totalHours / 24;
+                const totalMonths = totalDays / 30.44;
+                const totalYears = totalDays / 365.25;
+
+                if (totalYears >= 1.5) {
+                    nextEraTime = `~${totalYears.toFixed(1)} years`;
+                } else if (totalMonths >= 3) {
+                    nextEraTime = `~${totalMonths.toFixed(1)} months`;
+                } else if (totalDays >= 5) {
+                    nextEraTime = `~${totalDays.toFixed(1)} days`;
+                } else if (totalHours >= 12) {
+                    nextEraTime = `~${totalHours.toFixed(1)} hours`;
+                } else {
+                    nextEraTime = `~${totalMinutes.toFixed(1)} minutes`;
+                }
+            }
+
+            currentEraEl.innerHTML = `${era.toLocaleString()} <span class="detail">/ 55 (next era: ${nextEraTime})</span>`;
         }
 
         // Update Mining Difficulty (will be calculated by updateAllMinerInfo)

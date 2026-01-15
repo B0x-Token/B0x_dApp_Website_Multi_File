@@ -405,12 +405,13 @@ export async function connectWallet(resumeFromStep = null) {
         if (window.maybeRestoreDefaultAddressesfromContract) {
             try {
                 await withNetworkRetry(() => window.maybeRestoreDefaultAddressesfromContract(), 2, 'restoreAddresses');
-                console.log('✓ Reward token addresses loaded');
+                console.log('✓ Reward token addresses loaded #2');
             } catch (e) {
                 console.warn('restoreAddresses error:', e);
             }
+        } else {
+            console.log("NO window.maybeRestoreDefaultAddressesfromContract");
         }
-        if(currentSettingsAddresses.contractAddresses == "")
 
         // PARALLEL GROUP 2: Run independent data fetches simultaneously
         console.log("Fetching wallet data in parallel...");

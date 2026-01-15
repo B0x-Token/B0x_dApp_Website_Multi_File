@@ -19,7 +19,7 @@ import { customRPC } from './settings.js';
 import { getEstimate } from './swaps.js';
 import { showSuccessNotification, showInfoNotification } from './ui.js';
 import { fetchBalances } from './utils.js';
-import { checkAdminAccess } from './admin.js';
+// Note: Using window.checkAdminAccess instead of direct import to avoid circular dependency
 
 // Create aliases for commonly used addresses
 const Address_ZEROXBTC_TESTNETCONTRACT = tokenAddresses['0xBTC'];
@@ -2147,7 +2147,7 @@ export async function getCreatePosition() {
         fetchBalances();
 
         await getTokenIDsOwnedByMetamask(true);
-        await checkAdminAccess();
+        if (window.checkAdminAccess) await window.checkAdminAccess();
         await loadPositionsIntoDappSelections();
 
     } catch (error) {
