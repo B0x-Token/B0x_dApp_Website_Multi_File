@@ -32,7 +32,10 @@ import {
 import {
     showSuccessNotification,
     showErrorNotification,
-    showInfoNotification
+    showInfoNotification,
+    showSuccessNotificationCentered,
+    showErrorNotificationCentered,
+    showInfoNotificationCentered
 } from './ui.js';
 import {
     getTokenNameFromAddress,
@@ -456,7 +459,7 @@ export async function depositNFTStake() {
     const position = window.positionData?.[selectedPositionId];
 
     if (!position) {
-        showErrorNotification('Invalid Position', 'Selected position not found');
+        showErrorNotificationCentered('Invalid Position', 'Selected position not found');
         enableButton('depositNFTStakeBtn', 'Deposit NFT');
         return;
     }
@@ -508,7 +511,7 @@ export async function depositNFTStake() {
     );
 
     try {
-        showInfoNotification('Approve the NFT', 'Approve NFT TokenID: ' + positionID + ' for Staking');
+        showInfoNotificationCentered('Approve the NFT', 'Approve NFT TokenID: ' + positionID + ' for Staking');
 
         console.log(`Approving NFT token ${positionID}...`);
 
@@ -519,9 +522,9 @@ export async function depositNFTStake() {
         );
 
         console.log("Approval transaction sent:", approveTx.hash);
-        showInfoNotification();
+        showInfoNotificationCentered('Waiting for approval...', 'Please wait for confirmation');
         await approveTx.wait();
-        showSuccessNotification('Approved NFT Transfer!', 'Transaction confirmed on blockchain, now confirm in your wallet the Stake transaction', approveTx.hash);
+        showSuccessNotificationCentered('Approved NFT Transfer!', 'Now confirm the Stake transaction in your wallet');
 
         console.log("Approval confirmed!");
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -530,12 +533,12 @@ export async function depositNFTStake() {
         console.log(`Staking NFT token ${positionID}...`);
         const stakeTx = await LPStakingContract.stakeUniswapV3NFT(positionID);
 
-        showInfoNotification();
+        showInfoNotificationCentered('Staking NFT...', 'Please wait for confirmation');
         console.log("Staking transaction sent:", stakeTx.hash);
         await stakeTx.wait();
         console.log("NFT staked successfully!");
 
-        showSuccessNotification('NFT Staked Successfully!', 'Transaction confirmed on blockchain', stakeTx.hash);
+        showSuccessNotificationCentered('NFT Staked Successfully!', 'Transaction confirmed on blockchain');
         enableButton('depositNFTStakeBtn', 'Deposit NFT');
 
         if (window.fetchBalances) await window.fetchBalances();
@@ -545,6 +548,7 @@ export async function depositNFTStake() {
 
     } catch (error) {
         console.error("Error approving/staking NFT:", error);
+        showErrorNotificationCentered('Staking Failed', error.message || 'Failed to stake NFT');
         enableButton('depositNFTStakeBtn', 'Deposit NFT');
     }
 }

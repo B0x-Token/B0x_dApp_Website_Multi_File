@@ -27,8 +27,10 @@ class MobileNotificationWidget {
     constructor(position = 'bottom-right') {
         this.container = document.getElementById('notificationContainer');
         this.notifications = new Map();
+        this.recentNotifications = new Map(); // Track recent notifications to prevent duplicates
         this.counter = 0;
         this.position = position;
+        this.dedupeWindow = 1000; // 1 second deduplication window
         this.setPosition(position);
     }
 
@@ -59,6 +61,26 @@ class MobileNotificationWidget {
 
     show(type = 'info', title = '', message = '', duration = 10000) {
         if (!this.container) return null;
+
+        // Deduplication: check if same notification was shown recently
+        const notificationKey = `${type}:${title}:${message}`;
+        const now = Date.now();
+        const lastShown = this.recentNotifications.get(notificationKey);
+
+        if (lastShown && (now - lastShown) < this.dedupeWindow) {
+            console.log('Duplicate notification suppressed:', title);
+            return null; // Skip duplicate
+        }
+
+        // Track this notification
+        this.recentNotifications.set(notificationKey, now);
+
+        // Clean up old entries (older than 5 seconds)
+        for (const [key, timestamp] of this.recentNotifications) {
+            if (now - timestamp > 5000) {
+                this.recentNotifications.delete(key);
+            }
+        }
 
         const id = ++this.counter;
         const notification = document.createElement('div');
@@ -117,19 +139,41 @@ class MobileNotificationWidget {
     }
 
     success(title, message = '') {
+        this.setPosition('bottom-right'); // Ensure bottom-right for regular notifications
         return this.show('success', title, message);
     }
 
     error(title, message = '') {
+        this.setPosition('bottom-right'); // Ensure bottom-right for regular notifications
         return this.show('error', title, message);
     }
 
     warning(title, message = '') {
+        this.setPosition('bottom-right'); // Ensure bottom-right for regular notifications
         return this.show('warning', title, message);
     }
 
     info(title, message = '') {
+        this.setPosition('bottom-right'); // Ensure bottom-right for regular notifications
         return this.show('info', title, message);
+    }
+
+    // Show notification at middle-right of viewport (for mid-page buttons like deposit NFT)
+    showCentered(type, title, message = '', duration = 10000) {
+        this.setPosition('center');
+        return this.show(type, title, message, duration);
+    }
+
+    errorCentered(title, message = '') {
+        return this.showCentered('error', title, message);
+    }
+
+    successCentered(title, message = '') {
+        return this.showCentered('success', title, message);
+    }
+
+    infoCentered(title, message = '') {
+        return this.showCentered('info', title, message);
     }
 }
 
@@ -226,6 +270,33 @@ export function showWarningNotification(msg = 'High Gas Fees', msg2 = 'Network c
  */
 export function showInfoNotification(msg = 'Processing...', msg2 = 'Please wait for confirmation') {
     getNotificationWidget().info(msg, msg2);
+}
+
+/**
+ * Shows error notification centered on screen (for mid-page buttons)
+ * @param {string} msg - Main message
+ * @param {string} msg2 - Secondary message
+ */
+export function showErrorNotificationCentered(msg = 'Transaction Failed', msg2 = 'Please check wallet and try again') {
+    getNotificationWidget().errorCentered(msg, msg2);
+}
+
+/**
+ * Shows success notification centered on screen (for mid-page buttons)
+ * @param {string} msg - Main message
+ * @param {string} msg2 - Secondary message
+ */
+export function showSuccessNotificationCentered(msg = 'Success!', msg2 = '') {
+    getNotificationWidget().successCentered(msg, msg2);
+}
+
+/**
+ * Shows info notification centered on screen (for mid-page buttons)
+ * @param {string} msg - Main message
+ * @param {string} msg2 - Secondary message
+ */
+export function showInfoNotificationCentered(msg = 'Processing...', msg2 = 'Please wait for confirmation') {
+    getNotificationWidget().infoCentered(msg, msg2);
 }
 
 /**

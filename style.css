@@ -2934,6 +2934,13 @@ body.stats-active .content {
         max-width: calc(100vw - 20px);
     }
 
+    .notification-container.center {
+        top: 70%;
+        right: 10px;
+        transform: translateY(-80%);
+        max-width: calc(100vw - 20px);
+    }
+
     /* Individual Notification - Mobile Optimized */
     .notification {
         display: flex;
@@ -2985,6 +2992,15 @@ body.stats-active .content {
     }
 
     .notification-container.bottom-left .notification.show {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    .notification-container.center .notification {
+        transform: translateX(50px);
+    }
+
+    .notification-container.center .notification.show {
         transform: translateX(0);
         opacity: 1;
     }
