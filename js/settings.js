@@ -66,6 +66,18 @@ export let currentSettingsAddresses = {
 export let userSelectedPosition = null;
 
 /**
+ * Auto-fetch reward tokens toggle state
+ * @type {boolean}
+ */
+export let autoFetchRewardTokens = true;
+
+/**
+ * Cache duration for reward tokens (24 hours in milliseconds)
+ * @constant {number}
+ */
+const REWARD_TOKENS_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
  * Flag to track if user has made a manual selection
  * @type {boolean}
  */
@@ -119,6 +131,69 @@ export function setCustomDataSource(value) { customDataSource = value; CONFIG.DA
 export function setCustomBACKUPDataSource(value) { customBACKUPDataSource = value; }
 export function setUserSelectedPosition(value) { userSelectedPosition = value; }
 export function setHasUserMadeSelection(value) { hasUserMadeSelection = value; }
+export function setAutoFetchRewardTokens(value) { autoFetchRewardTokens = value; }
+
+// ============================================
+// AUTO-FETCH TOGGLE MANAGEMENT
+// ============================================
+
+/**
+ * Saves the auto-fetch reward tokens toggle state to localStorage
+ * @param {boolean} enabled - Whether auto-fetch is enabled
+ */
+export function saveAutoFetchToggle(enabled) {
+    autoFetchRewardTokens = enabled;
+    localStorage.setItem('autoFetchRewardTokens', JSON.stringify(enabled));
+    console.log('Auto-fetch reward tokens setting saved:', enabled);
+}
+
+/**
+ * Loads the auto-fetch toggle state from localStorage
+ * @returns {boolean} Whether auto-fetch is enabled (defaults to true)
+ */
+export function loadAutoFetchToggle() {
+    const saved = localStorage.getItem('autoFetchRewardTokens');
+    if (saved !== null) {
+        autoFetchRewardTokens = JSON.parse(saved);
+    } else {
+        autoFetchRewardTokens = true; // Default to enabled
+    }
+    return autoFetchRewardTokens;
+}
+
+/**
+ * Checks if the reward tokens cache is still valid (within 24 hours)
+ * @returns {boolean} True if cache is valid, false if expired or doesn't exist
+ */
+export function isRewardTokensCacheValid() {
+    const cacheTimestamp = localStorage.getItem('rewardTokensCacheTimestamp');
+    if (!cacheTimestamp) {
+        return false;
+    }
+
+    const timestamp = parseInt(cacheTimestamp, 10);
+    const now = Date.now();
+    const isValid = (now - timestamp) < REWARD_TOKENS_CACHE_DURATION;
+
+    console.log(`Reward tokens cache: ${isValid ? 'valid' : 'expired'} (age: ${Math.round((now - timestamp) / 1000 / 60)} minutes)`);
+    return isValid;
+}
+
+/**
+ * Updates the reward tokens cache timestamp
+ */
+export function updateRewardTokensCacheTimestamp() {
+    localStorage.setItem('rewardTokensCacheTimestamp', Date.now().toString());
+    console.log('Reward tokens cache timestamp updated');
+}
+
+/**
+ * Clears the reward tokens cache (forces refresh on next load)
+ */
+export function clearRewardTokensCache() {
+    localStorage.removeItem('rewardTokensCacheTimestamp');
+    console.log('Reward tokens cache cleared');
+}
 
 // ============================================
 // RPC URL MANAGEMENT - BASE NETWORK
@@ -435,12 +510,49 @@ export async function restoreDefaultAddressesfromContract() {
         }
         currentSettingsAddresses.contractAddresses = tokenAddresses;
 
+        // Save to localStorage for persistence across sessions
+        localStorage.setItem('stakingRewardAddresses', JSON.stringify(tokenAddresses));
+
+        // Update cache timestamp
+        updateRewardTokensCacheTimestamp();
+
         console.log('Addresses restored from contract:', tokenAddresses);
         showToast('Contract addresses loaded from blockchain');
     } catch (error) {
         // Silently fail for non-critical operation - just log a warning
         console.warn('Could not load settings from contract (non-critical):', error.message || error);
     }
+}
+
+/**
+ * Conditionally restores contract addresses from on-chain contract
+ * Only fetches if:
+ * 1. Auto-fetch toggle is enabled (toggle1 is checked)
+ * 2. Cache has expired (older than 24 hours) or doesn't exist
+ *
+ * @async
+ * @param {boolean} forceRefresh - Force refresh even if cache is valid
+ * @returns {Promise<void>}
+ */
+export async function maybeRestoreDefaultAddressesfromContract(forceRefresh = false) {
+    // Check if the toggle is enabled
+    const toggle1 = document.getElementById('toggle1');
+    const isToggleEnabled = toggle1 ? toggle1.checked : autoFetchRewardTokens;
+
+    if (!isToggleEnabled) {
+        console.log('Auto-fetch reward tokens is disabled, skipping contract fetch');
+        return;
+    }
+
+    // Check if cache is still valid (unless forced)
+    if (!forceRefresh && isRewardTokensCacheValid()) {
+        console.log('Reward tokens cache is still valid, using cached data');
+        return;
+    }
+
+    // Cache expired or forced refresh - fetch from contract
+    console.log('Fetching reward tokens from contract (cache expired or forced refresh)');
+    await restoreDefaultAddressesfromContract();
 }
 
 /**
@@ -501,10 +613,6 @@ export async function restoreDefaultAddressesfromGithub() {
         }
     }
 
-    const toggle = document.getElementById('toggle1');
-    if (toggle) {
-        toggle.checked = !toggle.checked;
-    }
 
     console.log('Addresses restored from GitHub');
     saveAddresses();
@@ -595,7 +703,12 @@ export function loadSettings() {
 
             const addressesElement = document.getElementById('contractAddresses');
             if (addressesElement) {
-                addressesElement.value = currentSettingsAddresses.contractAddresses;
+                // Format as JSON array string for display
+                if (Array.isArray(setting2)) {
+                    addressesElement.value = JSON.stringify(setting2);
+                } else {
+                    addressesElement.value = setting2;
+                }
             }
         } catch (error) {
             console.error('Error loading staking reward addresses:', error);
@@ -687,6 +800,26 @@ export function loadSettings() {
         const backupElement = document.getElementById('BACKUPcustomDataSource');
         if (backupElement) backupElement.value = customBACKUPDataSource;
     }
+
+    // Load auto-fetch toggle state
+    const savedAutoFetch = loadAutoFetchToggle();
+    const toggle1Element = document.getElementById('toggle1');
+    if (toggle1Element) {
+        toggle1Element.checked = savedAutoFetch;
+        // Set up change listener to save toggle state
+        if (!toggle1Element.hasAttribute('data-change-listener')) {
+            toggle1Element.addEventListener('change', function(e) {
+                saveAutoFetchToggle(e.target.checked);
+                if (e.target.checked) {
+                    // When enabling, clear cache to force refresh on next connect
+                    clearRewardTokensCache();
+                    console.log('Auto-fetch enabled - will fetch from contract on next wallet connection');
+                }
+            });
+            toggle1Element.setAttribute('data-change-listener', 'true');
+        }
+    }
+    console.log('Auto-fetch reward tokens setting:', savedAutoFetch);
 
     console.log('Settings loaded successfully');
 }

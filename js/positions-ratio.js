@@ -13,10 +13,13 @@
 // Import dependencies
 import { tokenAddresses, hookAddress, contractAddress_Swapper } from './config.js';
 import { connectWallet } from './wallet.js';
-import { positionData, stakingPositionData, updateTotalLiqIncrease } from './positions.js';
+import { positionData, stakingPositionData, updateTotalLiqIncrease, getTokenIDsOwnedByMetamask, loadPositionsIntoDappSelections } from './positions.js';
 import { updateTotalLiqIncreaseSTAKING } from './staking.js';
 import { customRPC } from './settings.js';
 import { getEstimate } from './swaps.js';
+import { showSuccessNotification, showInfoNotification } from './ui.js';
+import { fetchBalances } from './utils.js';
+import { checkAdminAccess } from './admin.js';
 
 // Create aliases for commonly used addresses
 const Address_ZEROXBTC_TESTNETCONTRACT = tokenAddresses['0xBTC'];
@@ -1845,6 +1848,315 @@ export async function getMaxCreatePosition() {
 }
 
 // ============================================
+// CREATE POSITION
+// ============================================
+
+/**
+ * Helper to disable button with spinner
+ * @param {string} ID - Button element ID
+ * @param {string} msg - Message to display
+ */
+function disableButtonWithSpinner(ID, msg = '<span class="spinner"></span> Approve transactions in wallet...') {
+    const btn = document.getElementById(ID);
+    if (!btn) {
+        console.error(`Button with ID '${ID}' not found`);
+        return;
+    }
+    if (!btn.dataset.originalText) {
+        btn.dataset.originalText = btn.innerHTML;
+    }
+    btn.disabled = true;
+    btn.setAttribute('disabled', 'disabled');
+    btn.style.pointerEvents = 'none';
+    btn.style.opacity = '0.6';
+    btn.innerHTML = msg;
+    btn.classList.add('btn-disabled-spinner');
+}
+
+/**
+ * Helper to enable button and restore original text
+ * @param {string} ID - Button element ID
+ * @param {string|null} originalText - Text to restore (optional)
+ */
+function enableButton(ID, originalText = null) {
+    const btn = document.getElementById(ID);
+    if (!btn) {
+        console.error(`Button with ID '${ID}' not found`);
+        return;
+    }
+    btn.disabled = false;
+    btn.removeAttribute('disabled');
+    btn.style.pointerEvents = '';
+    btn.style.opacity = '';
+    if (originalText) {
+        btn.innerHTML = originalText;
+    } else if (btn.dataset.originalText) {
+        btn.innerHTML = btn.dataset.originalText;
+    }
+    btn.classList.remove('btn-disabled-spinner');
+}
+
+/**
+ * Helper to approve token if needed
+ * @param {string} tokenToApprove - Token address
+ * @param {string} spenderAddress - Spender address
+ * @param {BigNumber} requiredAmount - Amount to approve
+ */
+async function approveIfNeeded(tokenToApprove, spenderAddress, requiredAmount) {
+    const erc20ABI = [
+        "function allowance(address owner, address spender) view returns (uint256)",
+        "function approve(address spender, uint256 amount) returns (bool)"
+    ];
+    const tokenContract = new ethers.Contract(tokenToApprove, erc20ABI, window.signer);
+    const currentAllowance = await tokenContract.allowance(window.userAddress, spenderAddress);
+    if (currentAllowance.lt(requiredAmount)) {
+        console.log(`Approving ${tokenToApprove} for ${spenderAddress}`);
+        const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
+        await approveTx.wait();
+        console.log("Approval successful");
+    } else {
+        console.log("Sufficient allowance already exists");
+    }
+}
+
+/**
+ * Creates a new liquidity position with two tokens
+ * @async
+ * @returns {Promise<void>}
+ */
+export async function getCreatePosition() {
+    if (!getWalletConnected()) {
+        await connectWallet();
+    }
+    disableButtonWithSpinner('getCreatePositionBtn');
+
+    var selectSlippage = document.getElementById('slippageToleranceCreate');
+    var selectSlippageValue = selectSlippage.value;
+    const numberValueSlippage = parseFloat(selectSlippageValue.replace('%', ''));
+    const decimalValueSlippage = numberValueSlippage / 100;
+    console.log("selectSlippageValue: ", selectSlippageValue);
+    console.log("decimalValueSlippage: ", decimalValueSlippage);
+
+    const tokenASelect = document.querySelector('#create .form-group:nth-child(1) select');
+    const tokenAValue = tokenASelect.value;
+    console.log("Currently selected value TokenA:", tokenAValue);
+
+    const tokenBSelect = document.querySelector('#create .form-group:nth-child(2) select');
+    const tokenBvalue = tokenBSelect.value;
+    console.log("Currently selected value TokenB:", tokenBvalue);
+
+    const selectedOptionA = tokenASelect.options[tokenASelect.selectedIndex];
+    const selectedOptionB = tokenBSelect.options[tokenBSelect.selectedIndex];
+    console.log("selectedOptionA option text:", selectedOptionA.text);
+    console.log("selectedOptionA option value:", selectedOptionA.value);
+    console.log("selectedOptionB option text:", selectedOptionB.text);
+    console.log("selectedOptionB option value:", selectedOptionB.value);
+
+    var tokenAinputAddress = tokenAddresses[selectedOptionA.value];
+    var tokenBinputAddress = tokenAddresses[selectedOptionB.value];
+    console.log("tokenA InputAddresstoken", tokenAinputAddress);
+    console.log("tokenB InputAddresstoken", tokenBinputAddress);
+
+    const createInputs = document.querySelectorAll('#create input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    if (!amountInputA || !amountInputB) {
+        console.error("Could not find amount input fields");
+        enableButton('getCreatePositionBtn', 'Create Position');
+        return;
+    }
+
+    const tokenAInput = amountInputA.value;
+    const tokenBInput = amountInputB.value;
+
+    console.log("Currently amountInputA value:", tokenAInput);
+    console.log("Currently amountInputB value:", tokenBInput);
+
+    var amountAtoCreate = ethers.utils.parseUnits(tokenAInput, 18);
+
+    if (selectedOptionA.value == "0xBTC") {
+        console.log("LOGGED 0xBTC selected A Value, createPosition");
+        amountAtoCreate = ethers.utils.parseUnits(tokenAInput, 8);
+    }
+
+    console.log("Currently amountInputB value:", tokenBInput);
+    var amountBtoCreate = ethers.utils.parseUnits(tokenBInput, 18);
+
+    if (selectedOptionB.value == "0xBTC") {
+        console.log("LOGGED 0xBTC selected B Value, createPosition");
+        amountBtoCreate = ethers.utils.parseUnits(tokenBInput, 8);
+    }
+
+    let amountOut = 0;
+    await throttledGetSqrtRtAndPriceRatio();
+
+    const ratioz = getRatioz();
+    const walletBalances = getWalletBalances();
+
+    let amountToDeposit = ethers.utils.parseEther("200");
+    var amountToDepositOfZer0X = ethers.utils.parseUnits("100", 8);
+    var amountWith8Decimals0xBTC = 0n;
+    let liquiditySalt = 0;
+
+    if (tokenAinputAddress == Address_ZEROXBTC_TESTNETCONTRACT) {
+        console.log("TokenA is 0xBTC, calculating TokenB amount");
+        const calculatedPriceRatio = BigInt(ratioz);
+        var priceIn18Decimals = 0n;
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) > BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            priceIn18Decimals = (10n ** 36n) / (calculatedPriceRatio * (10n ** 10n));
+            const amountZer0XIn18Decimals = BigInt(amountAtoCreate) * 10n ** 10n;
+            amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+            console.log("0xBTC bigger than b0x.  b0x smaller than 0xBTC");
+        } else {
+            const amountZer0XIn18Decimals = BigInt(amountAtoCreate) * 10n ** 10n;
+            priceIn18Decimals = calculatedPriceRatio / (10n ** 10n);
+            amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+            console.log("B0x bigger than 0xBTC. 0xBTC smaller than B0x");
+        }
+        amountWith8Decimals0xBTC = amountAtoCreate;
+        console.log(`fTokenA (0xBTC) amount: ${ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8)}`);
+        console.log(`fCalculated TokenB (B0x) amount: ${ethers.utils.formatEther(amountToDeposit)}`);
+    } else {
+        var amountB0x = BigInt(amountAtoCreate);
+        console.log("Amount B0x input: ", amountB0x.toString());
+        const priceRatio2 = BigInt(ratioz);
+        console.log(`priceRatio: ${priceRatio2}`);
+
+        var adjustedPriceRatio = 0n;
+        if (BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) > BigInt(tokenAddresses['B0x'].toLowerCase())) {
+            adjustedPriceRatio = (10n ** 36n) / (priceRatio2 * (10n ** 10n));
+            amountAtoCreate = (amountB0x * (10n ** 18n)) / adjustedPriceRatio / (10n ** 10n);
+            console.log("22 0xBTC bigger than b0x.  b0x smaller than 0xBTC");
+        } else {
+            const b0xInput = BigInt(amountAtoCreate);
+            const priceRatio = BigInt(ratioz);
+            console.log("22 B0x bigger than 0xBTC. 0xBTC smaller than B0x");
+            console.log(`B0x input: ${b0xInput}`);
+            console.log(`Price ratio: ${priceRatio}`);
+            amountB0x = (b0xInput * 10n ** 28n) / priceRatio / 10n ** 10n;
+            amountAtoCreate = b0xInput;
+            console.log(`Calculated 0xBTC: ${amountB0x}`);
+            console.log(`Original B0x: ${amountAtoCreate}`);
+        }
+        amountWith8Decimals0xBTC = amountB0x;
+        amountToDeposit = amountAtoCreate;
+    }
+
+    console.log("walletBalances: ", walletBalances['0xBTC']);
+    var zeroxbtcdecimal = amountWith8Decimals0xBTC.toString();
+    var wallet_zeroxbtc = ethers.utils.parseUnits(walletBalances['0xBTC'], 8).toString();
+    console.log("amountWith8Decimals0xBTC: ", zeroxbtcdecimal);
+    console.log("wallet_zeroxbtc: ", wallet_zeroxbtc);
+    if (parseFloat(zeroxbtcdecimal) > parseFloat(wallet_zeroxbtc)) {
+        alert("too much 0xbtc u dont have lower it!.");
+        await getMaxCreatePosition();
+        enableButton('getCreatePositionBtn', 'Create Position');
+        return;
+    }
+
+    var b0xdecimal = amountToDeposit.toString();
+    var wallet_b0x = ethers.utils.parseUnits(walletBalances['B0x'], 18).toString();
+    console.log("amountWith b0xdecimal:  ", b0xdecimal);
+    console.log("wallet_b0x: ", wallet_b0x);
+
+    if (parseFloat(b0xdecimal) > parseFloat(wallet_b0x)) {
+        alert("too much b0x u dont have lower it!.");
+        await getMaxCreatePosition();
+        enableButton('getCreatePositionBtn', 'Create Position');
+        return;
+    }
+
+    const amountToDepositBN = ethers.BigNumber.from(amountToDeposit.toString());
+    const amountToDepositBN2 = ethers.BigNumber.from(amountWith8Decimals0xBTC.toString());
+
+    const tokenSwapperABI = [
+        { "inputs": [{ "name": "token", "type": "address" }, { "name": "token2", "type": "address" }, { "name": "amountIn", "type": "uint256" }, { "name": "amountIn2", "type": "uint256" }, { "name": "currentx96", "type": "uint256" }, { "name": "slippage", "type": "uint256" }, { "name": "hookAddress", "type": "address" }, { "name": "toSendNFTto", "type": "address" }], "name": "createPositionWith2Tokens", "outputs": [{ "name": "", "type": "bool" }], "stateMutability": "payable", "type": "function" },
+        { "inputs": [{ "internalType": "address", "name": "token", "type": "address" }, { "internalType": "address", "name": "token2", "type": "address" }, { "internalType": "address", "name": "hookAddress", "type": "address" }], "name": "getsqrtPricex96", "outputs": [{ "internalType": "uint160", "name": "", "type": "uint160" }], "stateMutability": "view", "type": "function" },
+        {
+            "inputs": [
+                { "internalType": "address", "name": "token", "type": "address" },
+                { "internalType": "address", "name": "token2", "type": "address" },
+                { "internalType": "address", "name": "hookAddress", "type": "address" }
+            ],
+            "name": "getPriceRatio",
+            "outputs": [
+                { "internalType": "uint256", "name": "ratio", "type": "uint256" },
+                { "internalType": "address", "name": "token0z", "type": "address" },
+                { "internalType": "address", "name": "token1z", "type": "address" },
+                { "internalType": "uint8", "name": "token0decimals", "type": "uint8" },
+                { "internalType": "uint8", "name": "token1decimals", "type": "uint8" }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ];
+
+    const tokenSwapperContract = new ethers.Contract(
+        contractAddress_Swapper,
+        tokenSwapperABI,
+        window.signer
+    );
+
+    try {
+        console.log("tokenAddress: ", tokenAddress);
+        console.log("Address_ZEROXBTC_TESTNETCONTRACT: ", Address_ZEROXBTC_TESTNETCONTRACT.toString());
+        console.log("amountToDepositBN: ", amountToDepositBN.toString());
+        console.log("amountToDepositBN2: ", amountToDepositBN2.toString());
+        console.log("Current_getsqrtPricex96: ", getCurrentSqrtPricex96().toString());
+        console.log("HookAddress: ", HookAddress.toString());
+
+        alert("approving tokens for create position!");
+        await approveIfNeeded(tokenAddress, contractAddress_Swapper, amountToDepositBN);
+        await approveIfNeeded(Address_ZEROXBTC_TESTNETCONTRACT, contractAddress_Swapper, amountToDepositBN2);
+
+        var slippage = Math.floor(numberValueSlippage * 100);
+        console.log("Slippage = ", slippage);
+        console.log("Slippage % = ", (slippage / 100), "%");
+
+        showInfoNotification('Confirm Create Position', 'Confirm the create position transaction in your wallet');
+        const tx = await tokenSwapperContract.createPositionWith2Tokens(
+            tokenAddress,
+            Address_ZEROXBTC_TESTNETCONTRACT,
+            amountToDepositBN,
+            amountToDepositBN2,
+            getCurrentSqrtPricex96(),
+            slippage,
+            HookAddress,
+            window.userAddress
+        );
+
+        if (tokenAinputAddress == Address_ZEROXBTC_TESTNETCONTRACT) {
+            amountInputB.value = ethers.utils.formatUnits(amountToDeposit, 18);
+            amountInputA.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+        } else {
+            amountInputB.value = ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8);
+            amountInputA.value = ethers.utils.formatUnits(amountToDeposit, 18);
+        }
+
+        showInfoNotification();
+        await tx.wait();
+        console.log("Transaction confirmed!");
+        showSuccessNotification('Create Position!', 'Transaction confirmed you have created a liquidity position', tx.hash);
+
+        console.log("create Position transaction sent:", tx.hash);
+        console.log("Transaction confirmed!");
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        enableButton('getCreatePositionBtn', 'Create Position');
+        fetchBalances();
+
+        await getTokenIDsOwnedByMetamask(true);
+        await checkAdminAccess();
+        await loadPositionsIntoDappSelections();
+
+    } catch (error) {
+        console.error(`Error create Position:`, error);
+        enableButton('getCreatePositionBtn', 'Create Position');
+    }
+}
+
+// ============================================
 // WINDOW EXPORTS (for compatibility)
 // ============================================
 
@@ -1856,6 +2168,7 @@ window.getRatioIncreasePositiontokenB = getRatioIncreasePositiontokenB;
 window.getRatioStakeIncreasePositiontokenA = getRatioStakeIncreasePositiontokenA;
 window.getRatioStakeIncreasePositiontokenB = getRatioStakeIncreasePositiontokenB;
 window.getMaxCreatePosition = getMaxCreatePosition;
+window.getCreatePosition = getCreatePosition;
 
 // ============================================
 // ES6 EXPORTS

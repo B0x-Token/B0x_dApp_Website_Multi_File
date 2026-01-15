@@ -902,9 +902,19 @@ export async function getRewardStats() {
         "type": "function"
     }];
 
+    // Owner ABI for admin access checks (Ownable contracts)
+    const ownerABI = [{
+        "inputs": [],
+        "name": "owner",
+        "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+        "stateMutability": "view",
+        "type": "function"
+    }];
+
     const iface = new ethers.utils.Interface(getRewardStatsABI);
     const contractInterface = new ethers.utils.Interface(CONTRACT_ABI);
     const tokenSwapperInterface = new ethers.utils.Interface(tokenSwapperABI);
+    const ownerInterface = new ethers.utils.Interface(ownerABI);
     const multicallInterface = new ethers.utils.Interface(MULTICALL3_ABI);
     const erc20Interface = new ethers.utils.Interface(erc20ABI);
 
@@ -990,6 +1000,17 @@ export async function getRewardStats() {
             target: MULTICALL3_ADDRESS,
             allowFailure: true,
             callData: multicallInterface.encodeFunctionData("getEthBalance", [window.userAddress])
+        },
+        // Calls 23-24: Contract owner addresses for admin access (2 calls) - saves 2 RPC calls
+        {
+            target: contractAddressLPRewardsStaking,
+            allowFailure: true,
+            callData: ownerInterface.encodeFunctionData("owner")
+        },
+        {
+            target: HookAddress,
+            allowFailure: true,
+            callData: ownerInterface.encodeFunctionData("owner")
         }
     ];
 
@@ -1104,6 +1125,38 @@ export async function getRewardStats() {
         }
     } catch (balanceError) {
         console.warn("Failed to decode token balances from multicall:", balanceError);
+    }
+
+    // Decode owner addresses for admin access checks (indices 23-24)
+    try {
+        // LP Rewards Staking contract owner (index 23)
+        if (results[23] && results[23].success) {
+            const lpRewardsOwner = ownerInterface.decodeFunctionResult("owner", results[23].returnData)[0];
+            window.cachedAdminAddresses = window.cachedAdminAddresses || {};
+            window.cachedAdminAddresses.lpRewardsOwner = lpRewardsOwner;
+            console.log("LP Rewards Staking owner:", lpRewardsOwner);
+        }
+
+        // Hook contract owner (index 24)
+        if (results[24] && results[24].success) {
+            const hookOwner = ownerInterface.decodeFunctionResult("owner", results[24].returnData)[0];
+            window.cachedAdminAddresses = window.cachedAdminAddresses || {};
+            window.cachedAdminAddresses.hookOwner = hookOwner;
+            console.log("Hook contract owner:", hookOwner);
+        }
+
+        // Check if current user is admin (either LP owner or Hook owner)
+        if (window.userAddress && window.cachedAdminAddresses) {
+            const userAddr = window.userAddress.toLowerCase();
+            const isLPOwner = window.cachedAdminAddresses.lpRewardsOwner?.toLowerCase() === userAddr;
+            const isHookOwner = window.cachedAdminAddresses.hookOwner?.toLowerCase() === userAddr;
+            window.cachedAdminAddresses.isAdmin = isLPOwner || isHookOwner;
+            window.cachedAdminAddresses.isLPOwner = isLPOwner;
+            window.cachedAdminAddresses.isHookOwner = isHookOwner;
+            console.log("User admin status - LP Owner:", isLPOwner, "Hook Owner:", isHookOwner);
+        }
+    } catch (ownerError) {
+        console.warn("Failed to decode owner addresses from multicall:", ownerError);
     }
 
     const rewardAddressesStaking = result[0];

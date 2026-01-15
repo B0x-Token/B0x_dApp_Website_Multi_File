@@ -396,7 +396,12 @@ window.restoreDefaultCustomDataSource = Settings.restoreDefaultCustomDataSource;
 window.saveAddresses = Settings.saveAddresses;
 window.restoreDefaultAddresses = Settings.restoreDefaultAddresses;
 window.restoreDefaultAddressesfromContract = Settings.restoreDefaultAddressesfromContract;
+window.maybeRestoreDefaultAddressesfromContract = Settings.maybeRestoreDefaultAddressesfromContract;
 window.restoreDefaultAddressesfromGithub = Settings.restoreDefaultAddressesfromGithub;
+window.saveAutoFetchToggle = Settings.saveAutoFetchToggle;
+window.loadAutoFetchToggle = Settings.loadAutoFetchToggle;
+window.isRewardTokensCacheValid = Settings.isRewardTokensCacheValid;
+window.clearRewardTokensCache = Settings.clearRewardTokensCache;
 window.saveBACKUPCustomDataSource_Testnet = Settings.saveBACKUPCustomDataSource_Testnet;
 window.restoreDefaultBACKUPCustomDataSource = Settings.restoreDefaultBACKUPCustomDataSource;
 window.saveMinStaking = Settings.saveMinStaking;
@@ -543,10 +548,7 @@ window.executeConvert = async function() {
 };
 
 // Other UI helper functions
-window.getCreatePosition = async function() {
-    console.log('Create position functionality - check Positions module');
-    UI.showInfoNotification('Create Position', 'Use the Create Position form to add liquidity');
-};
+window.getCreatePosition = PositionsRatio.getCreatePosition;
 
 window.depositNFTStake = Staking.depositNFTStake;
 window.withdrawStake = Staking.withdrawNFTStake;
@@ -561,6 +563,15 @@ window.updateAdminFeeForPoolB0xETH = Admin.updateAdminFeeForPoolB0xETH;
 window.updateAdminFeeForPoolR0xBTC0xBTC = Admin.updateAdminFeeForPoolR0xBTC0xBTC;
 window.addERC20ToStakingContract = Admin.addERC20ToStakingContract;
 window.removeERC20FromStakingContract = Admin.removeERC20FromStakingContract;
+window.showAdminTab = Admin.showAdminTab;
+window.hideAdminTab = Admin.hideAdminTab;
+window.getIsAdmin = Admin.getIsAdmin;
+window.getIsLPOwner = Admin.getIsLPOwner;
+window.getIsHookOwner = Admin.getIsHookOwner;
+window.getCurrentPoolFee = Admin.getCurrentPoolFee;
+window.getCurrentPoolFee0xBTCETH = Admin.getCurrentPoolFee0xBTCETH;
+window.getCurrentPoolFeeB0xETH = Admin.getCurrentPoolFeeB0xETH;
+window.getCurrentPoolFeeR0xBTC0xBTC = Admin.getCurrentPoolFeeR0xBTC0xBTC;
 
 // Init module
 window.initializeDApp = Init.initializeDApp;

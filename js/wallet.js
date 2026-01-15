@@ -12,7 +12,7 @@ import {
 import {totalStakedAmounts, resetTotalStakedAmounts} from './positions.js';
 import {updateStakingValues} from './staking.js';
 import { showErrorNotification } from './ui.js';
-
+import {maybeRestoreDefaultAddressesfromContract} from './settings.js';
 // ============================================================================
 // WALLET STATE MANAGEMENT
 // ============================================================================
@@ -298,6 +298,14 @@ export async function connectWallet(resumeFromStep = null) {
     // Check if already connected
     if (walletConnected && !resumeFromStep) {
         console.log('Wallet already connected');
+                // This ensures getRewardStats uses the correct addresses on first load
+           console.log("LOGGGA");
+            try {
+                await maybeRestoreDefaultAddressesfromContract();
+                console.log('✓ Reward token addresses loaded');
+            } catch (e) {
+                console.warn('restoreAddresses error:', e);
+            }
         return userAddress;
     }
 
@@ -392,6 +400,18 @@ export async function connectWallet(resumeFromStep = null) {
         await Promise.all(balancePromises);
         await switchToBase();
 
+        // FIRST: Restore reward token addresses from contract if needed (before getRewardStats)
+        // This ensures getRewardStats uses the correct addresses on first load
+        if (window.maybeRestoreDefaultAddressesfromContract) {
+            try {
+                await withNetworkRetry(() => window.maybeRestoreDefaultAddressesfromContract(), 2, 'restoreAddresses');
+                console.log('✓ Reward token addresses loaded');
+            } catch (e) {
+                console.warn('restoreAddresses error:', e);
+            }
+        }
+        if(currentSettingsAddresses.contractAddresses == "")
+
         // PARALLEL GROUP 2: Run independent data fetches simultaneously
         console.log("Fetching wallet data in parallel...");
         const dataPromises = [];
@@ -439,14 +459,6 @@ export async function connectWallet(resumeFromStep = null) {
             } catch (e) {
                 console.warn('loadPositions error:', e);
             }
-        }
-
-        // Restore addresses if needed (low priority)
-        const toggle1 = document.getElementById('toggle1');
-        if (toggle1 && toggle1.checked && window.restoreDefaultAddressesfromContract) {
-            console.log("contractAddresses MATCH");
-            withNetworkRetry(() => window.restoreDefaultAddressesfromContract(), 2, 'restoreAddresses')
-                .catch(e => console.warn('restoreAddresses error:', e));
         }
 
         // Fetch ETH balances in background (non-blocking)
