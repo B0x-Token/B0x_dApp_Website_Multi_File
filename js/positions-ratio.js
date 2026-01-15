@@ -283,18 +283,303 @@ async function throttledGetSqrtRtAndPriceRatio(NameOfFunction = "General") {
  * @returns {Object} Calculated amounts and adjustment info
  */
 function calculateOptimalAmounts(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz, priorityToken = null, StakeSection = false) {
-    // This function needs to be extracted from script.js
-    // For now, call window version if available
-    if (typeof window.calculateOptimalAmounts === 'function') {
-        return window.calculateOptimalAmounts(tokenAValue, tokenBValue, tokenAAmount, tokenBAmount, walletBalances, ratioz, priorityToken, StakeSection);
+    tokenAValue = tokenAValue.trim();
+    tokenBValue = tokenBValue.trim();
+    const tokenAinputAddress = tokenAddresses[tokenAValue];
+    const tokenBinputAddress = tokenAddresses[tokenBValue];
+
+    console.log("TOKENA VALUE OPTIMAL : ", tokenAValue);
+    console.log("TOKENB VALUE OPTIMAL : ", tokenBValue);
+    console.log("tokenAAmount VALUE OPTIMAL : ", tokenAAmount);
+    console.log("tokenBAmount VALUE OPTIMAL : ", tokenBAmount);
+    console.log("tokenAinputAddress VALUE OPTIMAL : ", tokenAinputAddress);
+    console.log("tokenBinputAddress VALUE OPTIMAL : ", tokenBinputAddress);
+
+    // Check if ratioz is valid
+    if (!ratioz || ratioz.toString() === '0' || BigInt(ratioz.toString()) === 0n) {
+        console.warn("calculateOptimalAmounts: ratioz is 0 or undefined");
+        return {
+            amountToDeposit: 0n,
+            amountWith8Decimals0xBTC: 0n,
+            needsAdjustment: false,
+            limitingFactor: null,
+            error: 'Price ratio not loaded'
+        };
     }
 
-    console.error('calculateOptimalAmounts function not available');
+    // Determine which amount to use as the base calculation based on priority
+    let baseAmount, baseTokenValue, baseTokenAddress, otherTokenValue;
+
+    if (priorityToken === 'A') {
+        baseAmount = tokenAAmount;
+        baseTokenValue = tokenAValue;
+        baseTokenAddress = tokenAinputAddress;
+        otherTokenValue = tokenBValue;
+    } else if (priorityToken === 'B') {
+        baseAmount = tokenBAmount;
+        baseTokenValue = tokenBValue;
+        baseTokenAddress = tokenBinputAddress;
+        otherTokenValue = tokenAValue;
+    }
+
+    // Parse the base amount with correct decimals
+    const baseAmountParsed = ethers.utils.parseUnits(baseAmount, baseTokenValue === "0xBTC" ? 8 : 18);
+
+    console.log("Base Amount Parsed:", baseAmountParsed.toString());
+    console.log("Base Token:", baseTokenValue);
+    console.log("Priority Token:", priorityToken);
+
+    // Calculate the required amounts based on which token is the base
+    let amountToDeposit, amountWith8Decimals0xBTC;
+    const calculatedPriceRatio = BigInt(ratioz);
+
+    // Determine token order for ratio calculation
+    const is0xBTCToken0 = BigInt(Address_ZEROXBTC_TESTNETCONTRACT.toLowerCase()) < BigInt(tokenAddresses['B0x'].toLowerCase());
+    console.log("is0xBTCToken0:", is0xBTCToken0);
+
+    if (baseTokenAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+        // Base token is 0xBTC, calculate the B0x amount needed
+        console.log("Base is 0xBTC, calculating B0x needed");
+
+        let priceIn18Decimals;
+        if (is0xBTCToken0) {
+            // 0xBTC is token0, ratio is 0xBTC/B0x
+            // To get B0x from 0xBTC: multiply by ratio
+            priceIn18Decimals = calculatedPriceRatio / (10n ** 10n); // Convert 28 decimals to 18
+            console.log("0xBTC is token0, using direct ratio");
+        } else {
+            // 0xBTC is token1, ratio is B0x/0xBTC
+            // To get B0x from 0xBTC: divide by inverted ratio (multiply by inverse)
+            priceIn18Decimals = (10n ** 36n) / (calculatedPriceRatio * (10n ** 10n));
+            console.log("0xBTC is token1, inverting ratio");
+        }
+
+        const amountZer0XIn18Decimals = BigInt(baseAmountParsed) * (10n ** 10n);
+        amountWith8Decimals0xBTC = baseAmountParsed;
+        amountToDeposit = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+
+        console.log("Calculated B0x from 0xBTC:");
+        console.log("  0xBTC amount:", ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8));
+        console.log("  B0x needed:", ethers.utils.formatUnits(amountToDeposit, 18));
+
+    } else {
+        // Base token is B0x, calculate how much 0xBTC is needed
+        console.log("Base is B0x, calculating 0xBTC needed");
+
+        let priceIn18Decimals;
+        if (is0xBTCToken0) {
+            // 0xBTC is token0, ratio is 0xBTC/B0x
+            // To get 0xBTC from B0x: divide by ratio
+            priceIn18Decimals = calculatedPriceRatio / (10n ** 10n);
+            console.log("0xBTC is token0, using direct ratio for division");
+        } else {
+            // 0xBTC is token1, ratio is B0x/0xBTC
+            // To get 0xBTC from B0x: multiply by inverted ratio
+            priceIn18Decimals = (10n ** 36n) / (calculatedPriceRatio * (10n ** 10n));
+            console.log("0xBTC is token1, inverting ratio for multiplication");
+        }
+
+        amountToDeposit = baseAmountParsed;
+        amountWith8Decimals0xBTC = (BigInt(baseAmountParsed) * (10n ** 18n)) / priceIn18Decimals / (10n ** 10n);
+
+        console.log("Calculated 0xBTC from B0x:");
+        console.log("  B0x amount:", ethers.utils.formatUnits(amountToDeposit, 18));
+        console.log("  0xBTC needed:", ethers.utils.formatUnits(amountWith8Decimals0xBTC, 8));
+    }
+
+    // Get position data to include unclaimed fees
+    var positionSelect = document.querySelector('#increase select');
+    var positionDataSource = positionData;
+    if (StakeSection == true) {
+        positionSelect = document.querySelector('#stake-increase select');
+        positionDataSource = stakingPositionData;
+    }
+    console.log("Test positionSelect ", positionSelect);
+    const selectedPositionId = positionSelect ? positionSelect.value : null;
+    const position = selectedPositionId ? positionDataSource[selectedPositionId] : null;
+
+    // Calculate total available amounts (wallet + unclaimed fees)
+    const zeroxbtcdecimal = amountWith8Decimals0xBTC.toString();
+    let total_available_zeroxbtc;
+
+    if (position && position.tokenA === tokenAddresses['0xBTC']) {
+        const walletAmount = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenA.toString(), 8);
+        total_available_zeroxbtc = walletAmount.add(unclaimedAmount).toString();
+    } else if (position && position.tokenB === tokenAddresses['0xBTC']) {
+        const walletAmount = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenB.toString(), 8);
+        total_available_zeroxbtc = walletAmount.add(unclaimedAmount).toString();
+    } else {
+        total_available_zeroxbtc = ethers.utils.parseUnits(walletBalances['0xBTC'], 8).toString();
+    }
+
+    const b0xdecimal = amountToDeposit.toString();
+    let total_available_b0x;
+
+    if (position && position.tokenA === tokenAddresses['B0x']) {
+        const walletAmount = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenA.toString(), 18);
+        total_available_b0x = walletAmount.add(unclaimedAmount).toString();
+    } else if (position && position.tokenB === tokenAddresses['B0x']) {
+        const walletAmount = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenB.toString(), 18);
+        total_available_b0x = walletAmount.add(unclaimedAmount).toString();
+    } else {
+        total_available_b0x = ethers.utils.parseUnits(walletBalances['B0x'], 18).toString();
+    }
+
+    const zeroxbtcExceeded = parseFloat(zeroxbtcdecimal) > parseFloat(total_available_zeroxbtc);
+    const b0xExceeded = parseFloat(b0xdecimal) > parseFloat(total_available_b0x);
+
+    console.log("zeroxbtcExceeded:", zeroxbtcExceeded);
+    console.log("b0xExceeded:", b0xExceeded);
+    console.log("0xBTC needed:", ethers.utils.formatUnits(zeroxbtcdecimal, 8));
+    console.log("0xBTC available:", ethers.utils.formatUnits(total_available_zeroxbtc, 8));
+    console.log("B0x needed:", ethers.utils.formatUnits(b0xdecimal, 18));
+    console.log("B0x available:", ethers.utils.formatUnits(total_available_b0x, 18));
+
+    // If both are within limits, return as is
+    if (!zeroxbtcExceeded && !b0xExceeded) {
+        return {
+            amountToDeposit,
+            amountWith8Decimals0xBTC,
+            needsAdjustment: false,
+            priorityUsed: priorityToken,
+            debugInfo: {
+                baseToken: baseTokenValue,
+                baseAmount: baseAmount,
+                calculatedFrom: `${baseTokenValue} -> ${otherTokenValue}`
+            }
+        };
+    }
+
+    // If we exceed limits, calculate the optimal amounts within constraints
+    let maxZeroxbtc, maxB0x;
+
+    if (position && position.tokenA === tokenAddresses['0xBTC']) {
+        const walletAmount = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenA.toString(), 8);
+        maxZeroxbtc = walletAmount.add(unclaimedAmount);
+    } else if (position && position.tokenB === tokenAddresses['0xBTC']) {
+        const walletAmount = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenB.toString(), 8);
+        maxZeroxbtc = walletAmount.add(unclaimedAmount);
+    } else {
+        maxZeroxbtc = ethers.utils.parseUnits(walletBalances['0xBTC'], 8);
+    }
+
+    if (position && position.tokenA === tokenAddresses['B0x']) {
+        const walletAmount = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenA.toString(), 18);
+        maxB0x = walletAmount.add(unclaimedAmount);
+    } else if (position && position.tokenB === tokenAddresses['B0x']) {
+        const walletAmount = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+        const unclaimedAmount = ethers.utils.parseUnits(position.unclaimedFeesTokenB.toString(), 18);
+        maxB0x = walletAmount.add(unclaimedAmount);
+    } else {
+        maxB0x = ethers.utils.parseUnits(walletBalances['B0x'], 18);
+    }
+
+    // Calculate what amounts would be needed if we max out each token
+    let priceIn18Decimals;
+    let amountZer0XIn18Decimals;
+    let zeroxbtcNeededForMaxB0x;
+    let b0xNeededForMax0xBTC;
+
+    if (is0xBTCToken0) {
+        // 0xBTC is token0
+        priceIn18Decimals = calculatedPriceRatio / (10n ** 10n);
+
+        // If we max out 0xBTC, how much B0x do we need?
+        amountZer0XIn18Decimals = BigInt(maxZeroxbtc) * (10n ** 10n);
+        b0xNeededForMax0xBTC = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+
+        // If we max out B0x, how much 0xBTC do we need?
+        zeroxbtcNeededForMaxB0x = (BigInt(maxB0x) * (10n ** 18n)) / priceIn18Decimals / (10n ** 10n);
+    } else {
+        // 0xBTC is token1
+        priceIn18Decimals = (10n ** 36n) / (calculatedPriceRatio * (10n ** 10n));
+
+        // If we max out 0xBTC, how much B0x do we need?
+        amountZer0XIn18Decimals = BigInt(maxZeroxbtc) * (10n ** 10n);
+        b0xNeededForMax0xBTC = (amountZer0XIn18Decimals * priceIn18Decimals) / (10n ** 18n);
+
+        // If we max out B0x, how much 0xBTC do we need?
+        zeroxbtcNeededForMaxB0x = (BigInt(maxB0x) * (10n ** 18n)) / priceIn18Decimals / (10n ** 10n);
+    }
+
+    // Determine which scenario is actually possible
+    const canMaxOut0xBTC = b0xNeededForMax0xBTC <= BigInt(maxB0x);
+    const canMaxOutB0x = zeroxbtcNeededForMaxB0x <= BigInt(maxZeroxbtc);
+
+    let actualLimitingFactor;
+    let finalAmountToDeposit, finalAmountWith8Decimals0xBTC;
+
+    // Priority-based selection with proper limiting factor detection
+    if (canMaxOut0xBTC && canMaxOutB0x) {
+        // Both are possible, choose based on priority
+        if (priorityToken === 'A') {
+            if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+                actualLimitingFactor = 'B0x';
+                finalAmountWith8Decimals0xBTC = maxZeroxbtc;
+                finalAmountToDeposit = b0xNeededForMax0xBTC;
+            } else {
+                actualLimitingFactor = '0xBTC';
+                finalAmountToDeposit = maxB0x;
+                finalAmountWith8Decimals0xBTC = zeroxbtcNeededForMaxB0x;
+            }
+        } else if (priorityToken === 'B') {
+            if (tokenBinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+                actualLimitingFactor = 'B0x';
+                finalAmountWith8Decimals0xBTC = maxZeroxbtc;
+                finalAmountToDeposit = b0xNeededForMax0xBTC;
+            } else {
+                actualLimitingFactor = '0xBTC';
+                finalAmountToDeposit = maxB0x;
+                finalAmountWith8Decimals0xBTC = zeroxbtcNeededForMaxB0x;
+            }
+        }
+    } else if (canMaxOut0xBTC) {
+        actualLimitingFactor = 'B0x';
+        finalAmountWith8Decimals0xBTC = maxZeroxbtc;
+        finalAmountToDeposit = b0xNeededForMax0xBTC;
+    } else if (canMaxOutB0x) {
+        actualLimitingFactor = '0xBTC';
+        finalAmountToDeposit = maxB0x;
+        finalAmountWith8Decimals0xBTC = zeroxbtcNeededForMaxB0x;
+    } else {
+        const zeroxbtcRatio = parseFloat(total_available_zeroxbtc) / parseFloat(zeroxbtcdecimal);
+        const b0xRatio = parseFloat(total_available_b0x) / parseFloat(b0xdecimal);
+
+        if (zeroxbtcRatio < b0xRatio) {
+            actualLimitingFactor = '0xBTC';
+            finalAmountWith8Decimals0xBTC = maxZeroxbtc;
+            finalAmountToDeposit = b0xNeededForMax0xBTC;
+        } else {
+            actualLimitingFactor = 'B0x';
+            finalAmountToDeposit = maxB0x;
+            finalAmountWith8Decimals0xBTC = zeroxbtcNeededForMaxB0x;
+        }
+    }
+
     return {
-        amountToDeposit: 0n,
-        amountWith8Decimals0xBTC: 0n,
-        needsAdjustment: false,
-        limitingFactor: null
+        amountToDeposit: finalAmountToDeposit,
+        amountWith8Decimals0xBTC: finalAmountWith8Decimals0xBTC,
+        needsAdjustment: true,
+        limitingFactor: actualLimitingFactor,
+        priorityUsed: priorityToken,
+        debugInfo: {
+            baseToken: baseTokenValue,
+            baseAmount: baseAmount,
+            calculatedFrom: `${baseTokenValue} -> ${otherTokenValue}`,
+            canMaxOut0xBTC,
+            canMaxOutB0x,
+            b0xNeededForMax0xBTC: b0xNeededForMax0xBTC.toString(),
+            zeroxbtcNeededForMaxB0x: zeroxbtcNeededForMaxB0x.toString(),
+            maxZeroxbtc: maxZeroxbtc.toString(),
+            maxB0x: maxB0x.toString()
+        }
     };
 }
 
@@ -330,6 +615,18 @@ function calculateOptimalAmountsWithTokenBPrioritySTAKESECTIONI(tokenAValue, tok
  * @returns {Object} Final amounts with limiting factor information
  */
 export function getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, walletBalances, ratioz, requestedMaxToken, position = null, useFeesz) {
+    // Check if ratioz is valid before proceeding
+    if (!ratioz || ratioz.toString() === '0' || BigInt(ratioz.toString()) === 0n) {
+        console.warn("getMaxAmountsWithProperLimiting: ratioz is 0 or undefined, cannot calculate amounts");
+        return {
+            amountWith8Decimals0xBTC: 0n,
+            amountToDeposit: 0n,
+            actualLimitingFactor: 'none',
+            requestFulfilled: false,
+            reason: 'Price ratio not yet loaded. Please wait for ratio to be fetched.'
+        };
+    }
+
     // Calculate what the maximum possible amounts would be for each token (wallet + unclaimed fees)
     let maxZeroxbtc, maxB0x;
 
@@ -487,7 +784,7 @@ export function getMaxAmountsWithProperLimiting(tokenAValue, tokenBValue, wallet
  * @param {HTMLElement} inputElement - Input element
  * @returns {Object} Result of max amount calculation
  */
-function handleMaxButtonClick(tokenSymbol, inputElement) {
+async function handleMaxButtonClick(tokenSymbol, inputElement) {
     const tokenALabel = document.querySelector('#increase #tokenALabel');
     const tokenBLabel = document.querySelector('#increase #tokenBLabel');
     const tokenAValue = tokenALabel.textContent.trim();
@@ -497,6 +794,9 @@ function handleMaxButtonClick(tokenSymbol, inputElement) {
     const selectedPositionId = positionSelect.value;
     const position = positionData[selectedPositionId];
     console.log(" handleMaxButtonClick position: ", position);
+
+    // Ensure ratio is fetched before calculating amounts
+    await throttledGetSqrtRtAndPriceRatio();
 
     const ratioz = getRatioz();
     const walletBalances = getWalletBalances();
@@ -538,7 +838,7 @@ function handleMaxButtonClick(tokenSymbol, inputElement) {
  * @param {HTMLElement} inputElement - Input element
  * @returns {Object} Result of max amount calculation
  */
-function handleMaxButtonClickStakeIncrease(tokenSymbol, inputElement) {
+async function handleMaxButtonClickStakeIncrease(tokenSymbol, inputElement) {
     const tokenALabel = document.querySelector('#stake-increase #tokenALabelINC');
     const tokenBLabel = document.querySelector('#stake-increase #tokenBLabelINC');
     const tokenAValue = tokenALabel.textContent;
@@ -548,6 +848,9 @@ function handleMaxButtonClickStakeIncrease(tokenSymbol, inputElement) {
     const selectedPositionId = positionSelect.value;
     const position = stakingPositionData[selectedPositionId];
     console.log(" handleMaxButtonClickStakeIncrease position: ", position);
+
+    // Ensure ratio is fetched before calculating amounts
+    await throttledGetSqrtRtAndPriceRatio();
 
     const ratioz = getRatioz();
     const walletBalances = getWalletBalances();

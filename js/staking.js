@@ -26,7 +26,7 @@ import { positionData, stakingPositionData } from './positions.js';
 
 import {
 
-    customRPC
+    customRPC, currentSettingsAddresses
 } from './settings.js';
 
 import {
@@ -84,9 +84,6 @@ let rewardsAmount;
 let rewardsUSD;
 
 // Settings
-let currentSettingsAddresses = {
-    contractAddresses: '[]'
-};
 
 // ============================================
 // INITIALIZATION
@@ -758,9 +755,9 @@ const REWARD_STATS_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 
 window.rewardStatsCache = {
     timestamp: 0,
-    data: null
+    data: null,
+    userAddress: null  // Track which address the cache is for
 };
-
 
 export async function getRewardStats() {
     if (window.userAddress == "" || window.userAddress == null) {
@@ -769,19 +766,28 @@ export async function getRewardStats() {
 
     console.log("USERADDzzzY: ", window.userAddress);
 
-
-    
     const now = Date.now();
+    const currentAddress = window.userAddress?.toLowerCase();
+    const cachedAddress = window.rewardStatsCache.userAddress?.toLowerCase();
 
+    // Check if address changed - if so, invalidate cache
+    const addressChanged = currentAddress !== cachedAddress;
+    if (addressChanged && window.rewardStatsCache.data) {
+        console.log("User address changed, invalidating reward stats cache");
+    }
+
+    // Use cache only if fresh AND same address
     if (
         window.rewardStatsCache.data &&
+        !addressChanged &&
         (now - window.rewardStatsCache.timestamp) < REWARD_STATS_CACHE_TTL
     ) {
         console.log("Using cached reward stats (fresh)");
         return window.rewardStatsCache.data;
     }
-    
-    if (now - lastRewardStatsCall < REWARD_STATS_COOLDOWN && first3 > 3) {
+
+    // Skip cooldown check if address changed (need fresh data for new account)
+    if (!addressChanged && now - lastRewardStatsCall < REWARD_STATS_COOLDOWN && first3 > 3) {
         console.log("getRewardStats called too soon, skipping...");
         return;
     }
@@ -1165,7 +1171,8 @@ export async function getRewardStats() {
 
     window.rewardStatsCache = {
         timestamp: Date.now(),
-        data: finalResult
+        data: finalResult,
+        userAddress: window.userAddress  // Track which address this cache is for
     };
 
     

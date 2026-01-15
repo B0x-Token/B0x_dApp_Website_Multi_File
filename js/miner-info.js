@@ -101,6 +101,10 @@ let previousEpochCount = null;
 export let lastBaseBlock = 0;
 export let currentBlock = 0;
 export let estHashrate = 0;
+export function setEstHashrate(value) {
+    estHashrate = value;
+    console.log('estHashrate set to:', estHashrate);
+}
 export let lastDifficultyStartBlock = 0;
 export let sorted_miner_block_count_recent_hash = [];
 export let sorted_miner_block_count = [];

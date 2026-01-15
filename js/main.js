@@ -42,6 +42,9 @@ import * as MinerInfo from './miner-info.js';  // NEW: Mining stats and rich lis
 import * as Admin from './admin.js';
 import * as Init from './init.js';
 import * as Whitepaper from './whitepaper.js';  // NEW: Whitepaper page functionality
+import * as Pools from './pools.js';  // NEW: Pool fees functionality
+import * as MiningCalc from './mining-calc.js';  // NEW: Mining calculator functionality
+import * as Countdown from './countdown.js';  // NEW: Countdown timer and reload functionality
 
 // ============================================
 // EXPOSE MODULES GLOBALLY
@@ -278,6 +281,7 @@ window.getMinerAddressFromTopic = MinerInfo.getMinerAddressFromTopic;
 window.convertHashRateToReadable2 = MinerInfo.convertHashRateToReadable2;
 window.loadMoreBlocks = MinerInfo.loadMoreBlocks;
 window.pool_colors = MinerInfo.pool_colors;
+window.setEstHashrate = MinerInfo.setEstHashrate;
 
 // Rich list data loading
 window.loadData2 = UI.loadData2;
@@ -286,6 +290,9 @@ window.renderTable2 = UI.renderTable2;
 window.renderPagination2 = UI.renderPagination2;
 window.renderTable = UI.renderTable;
 window.renderPagination = UI.renderPagination;
+window.changePage = UI.changePage;
+window.filterData2 = UI.filterData2;
+window.initRichListEventListeners = UI.initRichListEventListeners;
 window.known_miners = MinerInfo.known_miners;
 
 // Whitepaper page functions
@@ -313,14 +320,33 @@ window.formatDuration = UI.formatDuration;
 window.formatAddress = UI.formatAddress;
 
 // Dropdowns
-window.loadPositionsIntoDappSelections = UI.loadPositionsIntoDappSelections;
+window.loadPositionsIntoDappSelections = Positions.loadPositionsIntoDappSelections;
+window.updatePositionInfoMAIN_UNSTAKING = UI.updatePositionInfoMAIN_UNSTAKING;
 
 // Table rendering
 window.renderRichListTable = UI.renderRichListTable;
 window.renderPaginationControls = UI.renderPaginationControls;
 window.updateRichListTable = UI.updateRichListTable;
 window.filterAndSortRichList = UI.filterAndSortRichList;
+window.updateTokenIcon = UI.updateTokenIcon;
 window.updateTokenIconETH = UI.updateTokenIconETH;
+window.updateTokenIconCreate = UI.updateTokenIconCreate;
+window.initTokenIconListeners = UI.initTokenIconListeners;
+
+// Pool fees
+window.getAllFees = Pools.getAllFees;
+window.getAllPoolFees = Pools.getAllPoolFees;
+
+// Mining calculator
+window.calculateMining = MiningCalc.calculateMining;
+window.useCurrentDiff = MiningCalc.useCurrentDiff;
+window.useNextDiff = MiningCalc.useNextDiff;
+window.setCurrentDifficulty = MiningCalc.setCurrentDifficulty;
+window.setNextDifficulty = MiningCalc.setNextDifficulty;
+window.setRewardPerSolve = MiningCalc.setRewardPerSolve;
+window.setBlocksToGo = MiningCalc.setBlocksToGo;
+window.setAvgRewardTime = MiningCalc.setAvgRewardTime;
+window.initMiningCalcEventListeners = MiningCalc.initMiningCalcEventListeners;
 
 // ============================================
 // EXPOSE CHART FUNCTIONS
@@ -537,10 +563,22 @@ window.initializeDApp = Init.initializeDApp;
 window.setupEventListeners = Init.setupEventListeners;
 window.initializeTabFromURL = Init.initializeTabFromURL;
 
+// Countdown module
+window.resetCountdown = Countdown.resetCountdown;
+window.startCountdown = Countdown.startCountdown;
+window.stopCountdown = Countdown.stopCountdown;
+window.startChecker = Countdown.startChecker;
+window.getCountdownElements = Countdown.getCountdownElements;
+window.updateCountdownDisplay = Countdown.updateCountdownDisplay;
+window.runReloadFunctions = Countdown.runReloadFunctions;
+window.getCountdownValue = Countdown.getCountdownValue;
+window.setCountdownValue = Countdown.setCountdownValue;
+window.isCountdownRunning = Countdown.isCountdownRunning;
+
 console.log('✅ All modules loaded successfully');
 console.log('📦 Modules available:', Object.keys({
     Config, Utils, UI, Wallet, Charts, ABIs, Settings,
-    Contracts, DataLoader, Staking, Positions, Swaps, Convert, Admin, Init, Whitepaper
+    Contracts, DataLoader, Staking, Positions, Swaps, Convert, Admin, Init, Whitepaper, Countdown
 }));
 console.log('🚀 B0x DApp ready for initialization');
 
@@ -565,5 +603,6 @@ export {
     Convert,
     Admin,
     Init,
-    Whitepaper
+    Whitepaper,
+    Countdown
 };

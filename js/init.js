@@ -13,10 +13,11 @@
 import { initializeChart, fetchPriceData, pricesLoaded } from './charts.js';
 import { checkWalletConnection, setupWalletListeners, connectWallet, disconnectWallet } from './wallet.js';
 import {
-    switchTab, switchTab2, switchTabForStats, updateLoadingStatus, showLoadingScreen, hideLoadingScreen,
+    switchTab, switchTab2, switchTabForStats, showStatsPageDirect, updateLoadingStatus, showLoadingScreen, hideLoadingScreen,
     initNotificationWidget, updateTokenIcon, updateTokenSelection, updatePositionDropdown,
-    displayWalletBalances, updatePositionInfoMAIN_UNSTAKING
+    displayWalletBalances, updatePositionInfoMAIN_UNSTAKING, initTokenIconListeners, initRichListEventListeners
 } from './ui.js';
+import { initMiningCalcEventListeners } from './mining-calc.js';
 import * as Settings from './settings.js';
 import { mainRPCStarterForPositions, isLatestSearchComplete } from './data-loader.js';
 import * as Staking from './staking.js';
@@ -26,6 +27,7 @@ import * as Convert from './convert.js';
 import { renderContracts, displayNetworkStatus } from './contracts.js';
 import { positionData, stakingPositionData, updatePositionInfo, updateTotalLiqIncrease, updateDecreasePositionInfo, updatePercentage } from './positions.js';
 import { updateStakingStats, populateStakingManagementData } from './staking.js';
+import { startCountdown } from './countdown.js';
 import { initializeMaxButtons } from './max-buttons.js';
 // ============================================
 // MAIN INITIALIZATION
@@ -58,7 +60,6 @@ export async function initializeDApp() {
 
         updateLoadingStatus('Loading smart contracts...');
 
-        await new Promise(resolve => setTimeout(resolve, 500));
 
 
         // Initialize chart (with error handling)
@@ -71,7 +72,6 @@ export async function initializeDApp() {
 
         updateLoadingStatus('Fetching data...');
 
-        await new Promise(resolve => setTimeout(resolve, 500));
         // Initialize staking stats UI
         Staking.updateStakingStats();
 
@@ -86,7 +86,6 @@ export async function initializeDApp() {
         }, 500);
 
         updateLoadingStatus('Initializing interface...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
         // Display network status
         await displayNetworkStatus();
 
@@ -96,14 +95,16 @@ export async function initializeDApp() {
         var x=0
        while(!pricesLoaded && x < 120){
         x++;
-                if(x > 12){
+                if(x > 24){
                     updateLoadingStatus('Loading price graphs..2. takes up to 30-60 seconds if main server is down');
 
                 }else{
 
                     updateLoadingStatus('Loading price graphs...');
                 }
-                
+                if(pricesLoaded){
+                    break;
+                }
             await new Promise(resolve => setTimeout(resolve, 500));
         }
 
@@ -111,12 +112,15 @@ export async function initializeDApp() {
         var xx=0
        while(!isLatestSearchComplete() && xx < 180){
         xx++;
-                if(xx > 12){
-                    updateLoadingStatus('Loading latest blockchain data..2. takes up to 30-90 seconds if main server is down');
+                if(xx > 24){
+                    updateLoadingStatus('Loading latest blockchain data... takes up to 30-90 seconds if main server is down');
 
                 }else{
 
                     updateLoadingStatus('Loading blockchain data...');
+                }
+                if(!isLatestSearchComplete()){
+                    break;
                 }
 
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -127,12 +131,15 @@ export async function initializeDApp() {
             await new Promise(resolve => setTimeout(resolve, 500));
 
         }else{
-            updateLoadingStatus('Ready, although took max time to get data!');
+            updateLoadingStatus('Ready, although took some time to get data!');
             await new Promise(resolve => setTimeout(resolve, 2500));
         }
 
         hideLoadingScreen();
 
+        // Start the countdown timer for periodic data refresh
+        startCountdown();
+        console.log('✓ Countdown timer started');
 
     } catch (error) {
         console.error('❌ DApp initialization error:', error);
@@ -250,38 +257,119 @@ export function setupEventListeners() {
 // TAB MANAGEMENT
 // ============================================
 
-/**
- * Initializes tab from URL parameter
- * @returns {void}
- */
-export function initializeTabFromURL() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const tab = urlParams.get('tab');
+// Valid tab names for URL-based tab switching
+const validTabs = [
+    'swap',
+    'create',
+    'increase',
+    'decrease',
+    'staking-main-page',
+    'staking',
+    'stake-increase',
+    'stake-decrease',
+    'convert',
+    'settings',
+    'staking-management',
+    'testnet-faucet',
+    'contract-info',
+    'stats',
+    'socials',
+    'stats-graphs',
+    'staking-rich-list',
+    'stats-mining-calc',
+    'stats-home',
+    'stats-staking-rich-list',
+    'whitepaper',
+    'side-pools',
+    'stats-rich-list',
+    'rich-list',
+    'miner'
+];
 
-    if (tab) {
-        console.log('Initializing tab from URL:', tab);
-        // Trigger tab switch based on URL parameter
-        const tabElement = document.querySelector(`[data-tab="${tab}"]`);
-        if (tabElement) {
-            tabElement.click();
+// Stats sub-tabs that require switchTabForStats() first
+const statsSubTabs = [
+    'staking-rich-list',
+    'stats-graphs',
+    'stats-home',
+    'stats-mining-calc',
+    'stats-staking-rich-list',
+    'stats-rich-list'
+];
+
+// Stats sub-tabs that need full stats data (difficulty, hashrate, etc.)
+const needsStatsData = ['stats', 'stats-home', 'stats-mining-calc'];
+
+/**
+ * Helper function to handle tab switching with proper stats handling
+ * @param {string} tabName - Tab name to switch to
+ */
+async function handleTabSwitch(tabName) {
+    // Handle tab name aliases
+    if (tabName === 'staking-rich-list') {
+        tabName = 'stats-staking-rich-list';
+    }
+    if (tabName === 'rich-list') {
+        tabName = 'stats-rich-list';
+    }
+    if (tabName === 'staking') {
+        tabName = 'staking-main-page';
+    }
+
+    // Check if this is a stats sub-tab
+    if (statsSubTabs.includes(tabName)) {
+        console.log("Switching to stats sub-tab:", tabName);
+
+        // Only load full stats data for tabs that need it
+        if (needsStatsData.includes(tabName)) {
+            // Use showStatsPageDirect to show target tab immediately, then load data
+            // This avoids jitter from showing stats-home first
+            await showStatsPageDirect(tabName);
+        } else {
+            // Just show stats page without waiting for mining data
+            switchTabForStats();
+            switchTab2(tabName);
+        }
+    } else {
+        console.log("Switching to tab:", tabName);
+        switchTab(tabName);
+    }
+}
+
+/**
+ * Initializes tab from URL parameter (e.g., ?tab=convert)
+ * @returns {Promise<void>}
+ */
+export async function initializeTabFromURL() {
+    console.log("Checking for tab URL parameter...");
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+
+    if (tabParam) {
+        console.log('Found tab parameter:', tabParam);
+
+        if (validTabs.includes(tabParam)) {
+            await handleTabSwitch(tabParam);
+        } else {
+            console.warn(`Invalid tab parameter: ${tabParam}`);
+            // Default to swap tab
+            switchTab('swap');
         }
     }
 }
 
 /**
- * Initializes tab from direct parameter
- * @returns {void}
+ * Initializes tab from direct parameter (e.g., ?stats-mining-calc)
+ * @returns {Promise<void>}
  */
-export function initializeTabFromDirectParam() {
-    // Check for direct tab parameter in hash
-    const hash = window.location.hash;
-    if (hash && hash.startsWith('#tab=')) {
-        const tab = hash.replace('#tab=', '');
-        console.log('Initializing tab from hash:', tab);
+export async function initializeTabFromDirectParam() {
+    const urlParams = new URLSearchParams(window.location.search);
 
-        const tabElement = document.querySelector(`[data-tab="${tab}"]`);
-        if (tabElement) {
-            tabElement.click();
+    // Check if any of the valid tab names exist as parameters
+    for (const tab of validTabs) {
+        if (urlParams.has(tab)) {
+            console.log('Found direct tab parameter:', tab);
+            await handleTabSwitch(tab);
+            return; // Exit after first match to prevent multiple tab switches
         }
     }
 }
@@ -295,8 +383,13 @@ export function updateURL(tabName) {
     if (!tabName) return;
 
     const url = new URL(window.location);
-    url.searchParams.set('tab', tabName);
-    window.history.pushState({}, '', url);
+    // Clear all existing tab-related params
+    url.search = '';
+    // Set the tab as a direct parameter (e.g., ?stats-mining-calc)
+    url.searchParams.set(tabName, '');
+    // Remove the = sign for cleaner URLs
+    const cleanUrl = url.toString().replace('=&', '&').replace(/=$/, '');
+    window.history.pushState({}, '', cleanUrl);
 }
 
 /**
@@ -760,14 +853,23 @@ document.addEventListener('DOMContentLoaded', async function () {
     await setupWalletListeners();
 
     // Initialize tabs from URL
-    initializeTabFromURL();
-    initializeTabFromDirectParam();
+    await initializeTabFromURL();
+    await initializeTabFromDirectParam();
 
     // Render contracts display
     renderContracts();
 
     // Setup DOM listeners (positions, inputs, sliders)
     setupDOMListeners();
+
+    // Initialize token icon listeners for swap/convert/create pages
+    initTokenIconListeners();
+
+    // Initialize rich list event listeners (sorting, paging, search)
+    initRichListEventListeners();
+
+    // Initialize mining calculator event listeners
+    initMiningCalcEventListeners();
 
     // Initialize MAX buttons for all input fields
     initializeMaxButtons();

@@ -116,6 +116,7 @@ export function getInvalidPositions() { return invalidPositions; }
 export function getCurrentBlock() { return currentBlockzzzz; }
 export function isMonitoringRunning() { return isRunning; }
 export function isLatestSearchComplete() { return latestSearch; }
+export function isSearchingLogs() { return WeAreSearchingLogsRightNow; }
 
 // ============================================
 // SETTERS
@@ -379,26 +380,57 @@ export async function mainRPCStarterForPositions() {
     console.log("Config RPC URL:", CONFIG.RPC_URL);
     console.log("Config Data URL:", CONFIG.DATA_URL);
 
-    // Fetch existing data first
+    // Try to load cached data from localStorage first
+    const LOCAL_STORAGE_KEY = 'testnet_uniswap_v4_local_data';
+    const LOCAL_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours max age for local cache
+    let loadedFromLocal = false;
+
     try {
-        await fetchDataFromUrl();
-        console.log("Position data loaded from remote source");
+        const localData = loadDataLocally(LOCAL_STORAGE_KEY);
+        if (localData && localData.metadata && localData.valid_positions && localData.nft_owners) {
+            const lastUpdated = new Date(localData.metadata.last_updated).getTime();
+            const cacheAge = Date.now() - lastUpdated;
+
+            if (cacheAge < LOCAL_CACHE_MAX_AGE) {
+                // Use cached data
+                validPositions = localData.valid_positions || [];
+                nftOwners = localData.nft_owners || {};
+                currentBlockzzzz = localData.metadata.current_block || CONFIG.START_BLOCK;
+
+                console.log(`✓ Loaded position data from localStorage (${Math.round(cacheAge / 60000)} min old)`);
+                console.log(`  - ${validPositions.length} valid positions`);
+                console.log(`  - ${Object.keys(nftOwners).length} NFT owners`);
+                console.log(`  - Continuing from block ${currentBlockzzzz}`);
+                loadedFromLocal = true;
+            } else {
+                console.log("Local cache expired, will fetch from remote");
+            }
+        }
     } catch (error) {
-        console.warn("Failed to load position data from URL:", error);
-        console.log("Continuing with empty position data...");
+        console.warn("Failed to load from localStorage:", error);
+    }
+
+    // If no local data, fetch from remote URL
+    if (!loadedFromLocal) {
+        try {
+            await fetchDataFromUrl();
+            console.log("Position data loaded from remote source");
+        } catch (error) {
+            console.warn("Failed to load position data from URL:", error);
+            console.log("Continuing with empty position data...");
+        }
     }
 
     // Mark as complete since we've attempted to load the data
     latestSearch = true;
 
-    // Note: The full continuous monitoring implementation (runContinuous, runOnce, scanBlocks, etc.)
-    // is now available in this module. To start continuous monitoring, call:
-    // runContinuous(blocksPerScan, sleepSeconds)
-    //
-    // For now, we just load pre-computed data from the URL.
-    // Call runContinuous() separately if real-time monitoring is needed.
-
     console.log("✓ Position tracking initialized");
+
+    // Start continuous monitoring in the background
+    // blocksPerScan = 1996, sleepSeconds = 180 (3 minutes between scans)
+    runContinuous(1996, 180).catch(err => {
+        console.warn("Continuous monitoring error:", err);
+    });
 
     // Return current state
     return {
@@ -1305,6 +1337,21 @@ export async function runContinuous(blocksPerScan = 1000, sleepSeconds = 10) {
                 if (typeof hideLoadingWidget === 'function') {
                     hideLoadingWidget();
                 }
+
+                // Save data to localStorage after completing sync
+                const storageKey = 'testnet_uniswap_v4_local_data';
+                saveDataLocally(storageKey, {
+                    metadata: {
+                        last_updated: new Date().toISOString(),
+                        current_block: currentBlockzzzz,
+                        total_valid_positions: validPositions.length,
+                        total_nft_owners: Object.keys(nftOwners).length
+                    },
+                    valid_positions: validPositions,
+                    nft_owners: nftOwners
+                });
+                console.log(`✓ Position data saved to localStorage`);
+
                 console.log(`✓ Caught up to block ${latestBlock}`);
                 WeAreSearchingLogsRightNow = false;
             } else {

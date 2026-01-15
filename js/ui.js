@@ -11,10 +11,15 @@ import { tokenIconsBase, tokenIconsETH, ProofOfWorkAddresss, tokenAddresses, con
 import { positionData, stakingPositionData } from './positions.js';
 import {functionCallCounter, incrementFunctionCallCounter, hasUserMadeSelection, customRPC, customDataSource, customBACKUPDataSource} from './settings.js'
 import {firstRewardsAPYRun} from './staking.js';
+import {
+    setCurrentDifficulty, setNextDifficulty, setRewardPerSolve,
+    setBlocksToGo, setAvgRewardTime, calculateMining
+} from './mining-calc.js';
 // =============================================================================
 // NOTIFICATION WIDGET CLASS
 // =============================================================================
 
+const _BLOCK_EXPLORER_ADDRESS_URL = 'https://basescan.org/address/';
 /**
  * Mobile-optimized notification widget for displaying toast messages
  */
@@ -357,6 +362,9 @@ let PreviousTabName = "";
  * @param {string} tabName - Name of tab to switch to
  */
 export async function switchTab(tabName) {
+    // Store previous tab and update immediately to prevent race conditions
+    const previousTab = PreviousTabName;
+    PreviousTabName = tabName;
 
     var name = '#' + tabName;
     getNotificationWidget().positionInContainer(name);
@@ -394,25 +402,30 @@ export async function switchTab(tabName) {
         }, 100);
     }
     // Tab-specific data loading
-    if (tabName == 'stats' && PreviousTabName != 'stats') {
-        console.log("SwitchTab2");
+    if (tabName == 'stats') {
+        // Always ensure stats-home is visible when switching to stats tab
         switchTab2('stats-home');
 
-        // First run SUPER COMBINED MULTICALL to populate window.cachedContractStats
-        if (typeof window.getRewardStats === 'function') {
-            console.log("Running SUPER COMBINED MULTICALL via getRewardStats...");
-            await window.getRewardStats();
-        }
+        // Only load data if coming from a different tab (avoid duplicate calls)
+        if (previousTab != 'stats') {
+            console.log("SwitchTab2 - Loading stats data");
 
-        // Load stats data if functions are available
-        if (typeof window.GetContractStatsWithMultiCall === 'function') {
-            const stats = await window.GetContractStatsWithMultiCall();
-            if (stats && typeof window.updateStatsDisplay === 'function') {
-                window.updateStatsDisplay(stats);
+            // First run SUPER COMBINED MULTICALL to populate window.cachedContractStats
+            if (typeof window.getRewardStats === 'function') {
+                console.log("Running SUPER COMBINED MULTICALL via getRewardStats...");
+                await window.getRewardStats();
             }
-        }
-        if (typeof window.updateAllMinerInfoFirst === 'function') {
-            await window.updateAllMinerInfoFirst();
+
+            // Load stats data if functions are available
+            if (typeof window.GetContractStatsWithMultiCall === 'function') {
+                const stats = await window.GetContractStatsWithMultiCall();
+                if (stats && typeof window.updateStatsDisplay === 'function') {
+                    window.updateStatsDisplay(stats);
+                }
+            }
+            if (typeof window.updateAllMinerInfoFirst === 'function') {
+                await window.updateAllMinerInfoFirst();
+            }
         }
     } else if (tabName === 'staking-management' || tabName === 'staking-main-page') {
         // Load staking data when switching to staking tabs
@@ -451,8 +464,6 @@ export async function switchTab(tabName) {
             page.style.display = 'none';
         });
     }
-
-    PreviousTabName = tabName;
 }
 
 /**
@@ -460,6 +471,10 @@ export async function switchTab(tabName) {
  */
 export async function switchTabForStats() {
     var tabName = 'stats';
+    // Store previous tab and update immediately to prevent race conditions
+    const previousTab = PreviousTabName;
+    PreviousTabName = tabName;
+
     // Hide all pages
     const pages = document.querySelectorAll('.page');
     pages.forEach(page => {
@@ -480,26 +495,80 @@ export async function switchTabForStats() {
         selectedPage.classList.add('active');
     }
 
-    if (tabName == 'stats' && PreviousTabName != 'stats') {
-        console.log("SwitchTab2 here");
-        switchTab2('stats-home');
+    // Always ensure stats-home is visible when switching to stats tab
+    switchTab2('stats-home');
+
+    // Only load data if coming from a different tab
+    if (previousTab != 'stats') {
+        console.log("SwitchTab2 here - Loading stats data");
         await GetContractStatsWithMultiCall();
         await updateAllMinerInfoFirst();
-    } else {
-        document.querySelectorAll('.nav-tab2').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        document.querySelectorAll('.stats-page').forEach(page => {
-            page.classList.remove('active');
-            page.style.display = 'none';
-        });
     }
-    PreviousTabName = tabName;
+
     console.log("previousTabName: ", PreviousTabName);
     if (tabName === 'stats') {
         document.querySelector('.content').style.padding = '0px';
     } else {
         document.querySelector('.content').style.padding = '40px';
+    }
+}
+
+/**
+ * Shows stats page and loads data WITHOUT switching to stats-home first
+ * Used for direct URL navigation to stats sub-tabs to avoid jitter
+ * @param {string} targetSubTab - The sub-tab to show after loading
+ */
+export async function showStatsPageDirect(targetSubTab) {
+    var tabName = 'stats';
+    // Store previous tab and update immediately to prevent race conditions
+    const previousTab = PreviousTabName;
+    PreviousTabName = tabName;
+
+    // Hide all pages
+    const pages = document.querySelectorAll('.page');
+    pages.forEach(page => {
+        page.classList.remove('active');
+        page.style.display = '';
+    });
+
+    // Remove active class from all tabs
+    const tabs = document.querySelectorAll('.nav-tab');
+    tabs.forEach(tab => tab.classList.remove('active'));
+
+    // Show stats page
+    const selectedPage = document.getElementById(tabName);
+    const selectedTab = document.querySelector(`[data-tab="${tabName}"]`);
+
+    if (selectedTab) selectedTab.classList.add('active');
+    if (selectedPage) {
+        selectedPage.classList.add('active');
+    }
+
+    // Set padding for stats
+    document.querySelector('.content').style.padding = '0px';
+
+    // Show target sub-tab FIRST (before loading data to avoid jitter)
+    switchTab2(targetSubTab);
+
+    // Then load data in background
+    if (previousTab != 'stats') {
+        console.log("showStatsPageDirect - Loading stats data for:", targetSubTab);
+
+        // First run SUPER COMBINED MULTICALL
+        if (typeof window.getRewardStats === 'function') {
+            await window.getRewardStats();
+        }
+
+        // Load stats data
+        if (typeof window.GetContractStatsWithMultiCall === 'function') {
+            const stats = await window.GetContractStatsWithMultiCall();
+            if (stats && typeof window.updateStatsDisplay === 'function') {
+                window.updateStatsDisplay(stats);
+            }
+        }
+        if (typeof window.updateAllMinerInfoFirst === 'function') {
+            await window.updateAllMinerInfoFirst();
+        }
     }
 }
 
@@ -778,15 +847,26 @@ export function handleWidgetVisibility() {
 // =============================================================================
 
 /**
- * Updates token icon
+ * Core function to update token icon - unified handler for all contexts
  * @param {string} selectId - Select element ID
  * @param {string} iconId - Icon element ID
+ * @param {Object} options - Configuration options
+ * @param {string} options.context - 'swap' | 'swapETH' | 'create' (default: 'swap')
+ * @param {boolean} options.clearAmount - Whether to clear amount input (default: true)
  */
-export function updateTokenIcon(selectId, iconId) {
+export function updateTokenIconCore(selectId, iconId, options = {}) {
+    const { context = 'swap', clearAmount = true } = options;
+
     const select = document.getElementById(selectId);
+    if (!select) return;
+
     const token = select.value;
     const icon = document.getElementById(iconId);
-    const iconURL = tokenIconsBase[token];
+    if (!icon) return;
+
+    // Select icon source based on context
+    const iconSource = context === 'swapETH' ? tokenIconsETH : tokenIconsBase;
+    const iconURL = iconSource[token];
 
     if (iconURL) {
         icon.innerHTML = `<img src="${iconURL}" alt="${token}" class="token-icon222" onerror="this.parentElement.textContent='${token.charAt(0)}'">`;
@@ -795,15 +875,38 @@ export function updateTokenIcon(selectId, iconId) {
     }
 
     // Clear the amount input field in the same form group
-    const formGroup = select.closest('.form-group').nextElementSibling;
-    if (formGroup && formGroup.classList.contains('form-group')) {
-        const amountInput = formGroup.querySelector('input[type="number"]');
-        if (amountInput) {
-            amountInput.value = '0.0';
+    if (clearAmount) {
+        const formGroup = select.closest('.form-group')?.nextElementSibling;
+        if (formGroup && formGroup.classList.contains('form-group')) {
+            const amountInput = formGroup.querySelector('input[type="number"]');
+            if (amountInput) {
+                amountInput.value = '0.0';
+            }
         }
     }
 
-    filterTokenOptionsSwap();
+    // Call appropriate filter function based on context
+    switch (context) {
+        case 'swapETH':
+            filterTokenOptionsSwapETH();
+            break;
+        case 'create':
+            filterTokenOptionsCreate();
+            break;
+        case 'swap':
+        default:
+            filterTokenOptionsSwap();
+            break;
+    }
+}
+
+/**
+ * Updates token icon (Base chain swap)
+ * @param {string} selectId - Select element ID
+ * @param {string} iconId - Icon element ID
+ */
+export function updateTokenIcon(selectId, iconId) {
+    updateTokenIconCore(selectId, iconId, { context: 'swap' });
 }
 
 /**
@@ -812,31 +915,12 @@ export function updateTokenIcon(selectId, iconId) {
  * @param {string} iconId - Icon element ID
  */
 export function updateTokenIconETH(selectId, iconId) {
-    const select = document.getElementById(selectId);
-    const token = select.value;
-    const icon = document.getElementById(iconId);
-    const iconURL = tokenIconsETH[token];
-
-    if (iconURL) {
-        icon.innerHTML = `<img src="${iconURL}" alt="${token}" class="token-icon222" onerror="this.parentElement.textContent='${token.charAt(0)}'">`;
-    } else {
-        icon.textContent = token.charAt(0);
-    }
-
-    const formGroup = select.closest('.form-group').nextElementSibling;
-    if (formGroup && formGroup.classList.contains('form-group')) {
-        const amountInput = formGroup.querySelector('input[type="number"]');
-        if (amountInput) {
-            amountInput.value = '0.0';
-        }
-    }
-
-    filterTokenOptionsSwapETH();
-   // getConvertTotal(false);
+    updateTokenIconCore(selectId, iconId, { context: 'swapETH' });
 }
 
 /**
  * Updates token icon for create position page
+ * Handles multiple token selectors in the create form
  */
 export function updateTokenIconCreate() {
     const formGroups = document.querySelectorAll('#create .form-group');
@@ -850,12 +934,6 @@ export function updateTokenIconCreate() {
             const labelText = label.textContent;
             if (labelText === 'Token A' || labelText === 'Token B') {
                 const selectedValue = select.value;
-                const tokenIcons = {
-                    'ETH': 'E',
-                    'USDC': 'U',
-                    'DAI': 'D',
-                    'WBTC': 'W'
-                };
                 const iconURL = tokenIconsBase[selectedValue];
 
                 if (iconURL) {
@@ -868,6 +946,48 @@ export function updateTokenIconCreate() {
     });
 
     filterTokenOptionsCreate();
+}
+
+/**
+ * Unified event listener setup for token selectors
+ * Call this once on page load to set up all token icon update listeners
+ */
+export function initTokenIconListeners() {
+    // Swap page listeners (Base chain) - uses fromToken22/toToken22
+    const fromToken22 = document.getElementById('fromToken22');
+    const toToken22 = document.getElementById('toToken22');
+
+    if (fromToken22) {
+        fromToken22.addEventListener('change', () => {
+            updateTokenIcon('fromToken22', 'fromTokenIcon22');
+        });
+    }
+    if (toToken22) {
+        toToken22.addEventListener('change', () => {
+            updateTokenIcon('toToken22', 'toTokenIcon11');
+        });
+    }
+
+    // Convert page listeners (ETH chain) - uses fromToken/toToken
+    const fromTokenETH = document.querySelector('#convert #fromToken');
+    const toTokenETH = document.querySelector('#convert #toToken');
+
+    if (fromTokenETH) {
+        fromTokenETH.addEventListener('change', () => {
+            updateTokenIconETH('fromToken', 'fromTokenIcon');
+        });
+    }
+    if (toTokenETH) {
+        toTokenETH.addEventListener('change', () => {
+            updateTokenIconETH('toToken', 'toTokenIcon');
+        });
+    }
+
+    // Create position page listeners
+    const createSelects = document.querySelectorAll('#create .token-selector select');
+    createSelects.forEach(select => {
+        select.addEventListener('change', updateTokenIconCreate);
+    });
 }
 
 /**
@@ -1739,13 +1859,412 @@ function sortData() {
  * Updates statistics for B0x rich list
  */
 function updateStats() {
-    // Implementation depends on what stats you want to display
-    console.log("Rich list stats updated");
+    const totalHolders = combinedData.length;
+    const totalBaseB0x = combinedData.reduce((sum, holder) => sum + holder.b0xBalance, 0);
+    const totalETHB0x = combinedData.reduce((sum, holder) => sum + holder.ethB0xBalance, 0);
+
+    console.log("TOTAL ETH B0x: ", totalETHB0x);
+    const lastUpdated = new Date(baseData.lastUpdated).toLocaleString();
+
+    document.getElementById('totalHolders').textContent = totalHolders.toLocaleString();
+    document.getElementById('totalBaseB0x').textContent = totalBaseB0x.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    document.getElementById('totalETHB0x').textContent = totalETHB0x.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    document.getElementById('lastUpdated').textContent = lastUpdated;
+}
+
+/**
+ * Changes page for B0x rich list pagination
+ * @param {number} page - Page number to navigate to
+ */
+export function changePage(page) {
+    currentPage2 = page;
+    renderTable();
+}
+
+/**
+ * Filters rich list data based on search input
+ */
+export function filterData2() {
+    const searchBox = document.getElementById('searchBox2');
+    const searchTerm = searchBox ? searchBox.value.toLowerCase() : '';
+
+    if (searchTerm === '') {
+        filteredData2 = [...combinedData];
+    } else {
+        filteredData2 = combinedData.filter(holder =>
+            holder.address.toLowerCase().includes(searchTerm)
+        );
+    }
+
+    currentPage2 = 1;
+    renderTable();
+}
+
+/**
+ * Initializes event listeners for rich list controls (sorting, page size, search)
+ */
+export function initRichListEventListeners() {
+    // Search box event listener
+    const searchBox2 = document.getElementById('searchBox2');
+    if (searchBox2) {
+        searchBox2.addEventListener('input', filterData2);
+    }
+
+    // Page size dropdown event listener
+    const pageSize2El = document.getElementById('pageSize2');
+    if (pageSize2El) {
+        pageSize2El.addEventListener('change', function () {
+            pageSize2 = parseInt(this.value);
+            currentPage2 = 1;
+            renderTable();
+        });
+    }
+
+    // Sort by Base B0x button
+    const sortB0xBtn = document.getElementById('sortB0x');
+    if (sortB0xBtn) {
+        sortB0xBtn.addEventListener('click', function () {
+            if (currentSort !== 'b0x') {
+                currentSort = 'b0x';
+                document.getElementById('sortB0x').classList.add('active');
+                document.getElementById('sort0xBTC').classList.remove('active');
+                sortData();
+                filteredData2 = [...combinedData];
+                renderTable();
+            }
+        });
+    }
+
+    // Sort by ETH B0x button
+    const sort0xBTCBtn = document.getElementById('sort0xBTC');
+    if (sort0xBTCBtn) {
+        sort0xBTCBtn.addEventListener('click', function () {
+            if (currentSort !== 'ethb0x') {
+                currentSort = 'ethb0x';
+                document.getElementById('sort0xBTC').classList.add('active');
+                document.getElementById('sortB0x').classList.remove('active');
+                sortData();
+                filteredData2 = [...combinedData];
+                renderTable();
+            }
+        });
+    }
+
+    console.log('Rich list event listeners initialized');
 }
 
 // =============================================================================
 // TABLE RENDERING FUNCTIONS
 // =============================================================================
+
+/**
+ * Adjusts table styling based on screen size for staking rich list
+ */
+function adjustTableForScreenSize() {
+    const activeTab = document.querySelector('.nav-tab2.active');
+    const activeTab2 = activeTab?.getAttribute('data-tab');
+    console.log("active Tab: ", activeTab?.getAttribute('data-tab'));
+
+    if (activeTab && activeTab2 == 'stats-staking-rich-list') {
+        const table = document.querySelector('#tableContent55 table');
+        if (!table) return;
+
+        const screenWidth = window.innerWidth;
+
+        if (screenWidth <= 768) {
+            // Mobile styles - shrink to content with overflow
+            table.style.fontSize = '0.8rem';
+            table.style.width = 'auto';
+            table.style.minWidth = '415px';
+            table.style.tableLayout = 'auto';
+
+            const tableParent = table.parentElement;
+            if (tableParent) {
+                tableParent.style.overflowX = 'auto';
+                tableParent.style.maxWidth = '100%';
+            }
+
+            const headers = table.querySelectorAll('th');
+            const cells = table.querySelectorAll('td');
+
+            headers.forEach(header => {
+                header.style.whiteSpace = 'nowrap';
+                header.style.width = '1%';
+
+                if (header.textContent === 'Rank') {
+                    header.style.fontSize = '0.8em';
+                    header.style.padding = '2px 3px';
+                } else {
+                    header.style.fontSize = '1em';
+                    header.style.padding = '8px 10px';
+                }
+            });
+
+            cells.forEach(cell => {
+                cell.style.padding = '8px 6px';
+                cell.style.whiteSpace = 'nowrap';
+                cell.style.width = '1%';
+                cell.style.overflow = 'hidden';
+            });
+
+        } else if (screenWidth <= 1024) {
+            // Tablet styles
+            table.style.fontSize = '0.9rem';
+            table.style.width = '100%';
+            table.style.tableLayout = '';
+
+            const headers = table.querySelectorAll('th');
+
+            headers.forEach(header => {
+                header.style.width = '';
+                header.style.whiteSpace = '';
+
+                if (header.textContent === 'Rank') {
+                    header.style.fontSize = '0.9em';
+                    header.style.padding = '3px 4px';
+                } else {
+                    header.style.fontSize = '2.2em';
+                    header.style.padding = '10px 14px';
+                }
+            });
+
+            const cells = table.querySelectorAll('td');
+            cells.forEach(cell => {
+                cell.style.width = '';
+                cell.style.whiteSpace = '';
+            });
+        } else {
+            console.log("not in the staking rich list for stats");
+        }
+    }
+}
+
+// Listen for window resize
+window.addEventListener('resize', adjustTableForScreenSize);
+
+/**
+ * Adjusts table styling based on screen size for holder rich list
+ */
+function fixsize() {
+    const activeTab = document.querySelector('.nav-tab2.active');
+
+    if (activeTab && (activeTab.textContent.trim().includes('Rich List') || activeTab.id === 'stats-rich-list' || activeTab.classList.contains('stats-rich-list'))) {
+        console.log('Active tab:', activeTab.textContent.trim());
+
+        setTimeout(() => {
+            const table = document.querySelector('#tableContent .table-rich');
+            console.log("Table found:", !!table);
+
+            if (table) {
+                console.log("Processing table with class:", table.className);
+                const screenWidth = window.innerWidth;
+
+                if (screenWidth <= 650) {
+                    // Extra small screens - aggressive compression
+                    table.style.fontSize = '0.5rem';
+                    table.style.width = 'auto';
+                    table.style.minWidth = '415px';
+                    table.style.tableLayout = 'auto';
+
+                    const headers = table.querySelectorAll('th');
+                    const cells = table.querySelectorAll('td');
+
+                    const tableParent = table.parentElement;
+                    if (tableParent) {
+                        tableParent.style.overflowX = 'auto';
+                        tableParent.style.maxWidth = '100%';
+                    }
+
+                    headers.forEach(header => {
+                        if (header.classList.contains('balance-th-rank')) {
+                            header.style.fontSize = '0.8em';
+                            header.style.padding = '1px';
+                            header.style.width = '1%';
+                            header.style.whiteSpace = 'nowrap';
+                            header.textContent = 'Rank';
+                        } else if (header.classList.contains('balance-th')) {
+                            header.style.fontSize = '1.5em';
+                            header.style.padding = '2px';
+                            header.style.width = '1%';
+                            header.style.whiteSpace = 'nowrap';
+                            header.textContent = 'Addr';
+                        } else if (header.classList.contains('balance-th-balance')) {
+                            header.style.fontSize = '1.5em';
+                            header.style.whiteSpace = 'nowrap';
+                            header.style.width = '1%';
+                            header.style.padding = '2px';
+                            if (header.textContent.includes('ETH B0x')) {
+                                header.textContent = 'ETH B0x';
+                            } else if (header.textContent.includes('Base B0x')) {
+                                header.textContent = 'Base B0x';
+                            }
+                        }
+                    });
+
+                    cells.forEach(cell => {
+                        cell.style.padding = '2px 1px';
+                        cell.style.overflow = 'hidden';
+
+                        if (cell.classList.contains('balance-rich')) {
+                            cell.style.fontSize = '1.5em';
+                            cell.style.whiteSpace = 'nowrap';
+                            cell.style.width = '1%';
+                        }
+
+                        if (cell.classList.contains('address-rich')) {
+                            cell.style.fontSize = '1.7em';
+                            cell.style.overflow = 'hidden';
+                            cell.style.whiteSpace = 'nowrap';
+                            cell.style.width = '1%';
+
+                            const link = cell.querySelector('a');
+                            if (link) {
+                                link.style.display = 'inline-block';
+                                link.style.whiteSpace = 'nowrap';
+
+                                const address = link.textContent;
+                                if (address.length > 14 && !address.includes('...')) {
+                                    link.textContent = address.slice(0, 4) + '...' + address.slice(-4);
+                                }
+                            }
+                        }
+                    });
+
+                } else if (screenWidth <= 875) {
+                    table.style.fontSize = '0.6rem';
+                    table.style.tableLayout = 'auto';
+
+                    const headers = table.querySelectorAll('th');
+                    const cells = table.querySelectorAll('td');
+
+                    headers.forEach(header => {
+                        if (header.classList.contains('balance-th-rank')) {
+                            header.style.fontSize = '1.5em';
+                            header.style.padding = '2px 2px';
+                            header.style.width = 'auto';
+                        } else if (header.classList.contains('balance-th')) {
+                            header.style.fontSize = '0.9em';
+                            header.style.padding = '4px 6px';
+                            header.style.width = 'auto';
+                            header.textContent = 'Address';
+                        } else if (header.classList.contains('balance-th-balance')) {
+                            header.style.fontSize = '0.8em';
+                            header.style.padding = '4px 4px';
+                            header.style.width = 'auto';
+                        }
+                    });
+
+                    cells.forEach(cell => {
+                        cell.style.padding = '4px 2px';
+                        cell.style.wordBreak = 'normal';
+                        cell.style.overflow = 'visible';
+
+                        if (cell.classList.contains('balance-rich')) {
+                            cell.style.fontSize = '2em';
+                        }
+                        if (cell.classList.contains('address-rich')) {
+                            cell.style.fontSize = '0.75em';
+                            const link = cell.querySelector('a');
+                            if (link) {
+                                const fullAddress = cell.getAttribute('data-full-address') || link.textContent;
+                                if (fullAddress.length > 30 && !fullAddress.includes('...')) {
+                                    link.textContent = fullAddress.slice(0, 10) + '...' + fullAddress.slice(-10);
+                                }
+                            }
+                        }
+                    });
+
+                } else if (screenWidth <= 1024) {
+                    table.style.fontSize = '0.9rem';
+                    table.style.tableLayout = 'auto';
+
+                    const cells = table.querySelectorAll('td');
+                    const headers = table.querySelectorAll('th');
+
+                    headers.forEach(header => {
+                        if (header.classList.contains('balance-th-rank')) {
+                            header.style.fontSize = '0.9em';
+                            header.style.padding = '3px 4px';
+                        } else if (header.classList.contains('balance-th')) {
+                            header.style.fontSize = '2.2em';
+                            header.style.padding = '10px 14px';
+                        } else if (header.classList.contains('balance-th-balance')) {
+                            header.style.fontSize = '2.2em';
+                            header.style.padding = '10px 14px';
+                        }
+                    });
+
+                    cells.forEach(cell => {
+                        cell.style.padding = '4px 2px';
+                        if (cell.classList.contains('balance-rich')) {
+                            cell.style.fontSize = '2.3em';
+                        }
+                        if (cell.classList.contains('address-rich')) {
+                            cell.style.fontSize = '0.85em';
+                            const link = cell.querySelector('a');
+                            if (link) {
+                                const fullAddress = cell.getAttribute('data-full-address');
+                                if (fullAddress) {
+                                    link.textContent = fullAddress.slice(0, 12) + '...' + fullAddress.slice(-12);
+                                }
+                            }
+                        }
+                    });
+
+                } else {
+                    table.style.fontSize = '1rem';
+                    table.style.tableLayout = 'auto';
+
+                    const cells = table.querySelectorAll('td');
+                    const headers = table.querySelectorAll('th');
+
+                    headers.forEach(header => {
+                        if (header.classList.contains('balance-th-rank')) {
+                            header.style.fontSize = '1em';
+                            header.style.padding = '3px 4px';
+                        } else if (header.classList.contains('balance-th')) {
+                            header.style.fontSize = '2.5em';
+                            header.style.padding = '12px 16px';
+                        } else if (header.classList.contains('balance-th-balance')) {
+                            header.style.fontSize = '2.5em';
+                            header.style.padding = '12px 16px';
+                        }
+                    });
+
+                    cells.forEach(cell => {
+                        cell.style.padding = '4px 2px';
+                        if (cell.classList.contains('balance-rich')) {
+                            cell.style.fontSize = '2.753em';
+                        }
+                        if (cell.classList.contains('address-rich')) {
+                            cell.style.fontSize = '1em';
+                            const link = cell.querySelector('a');
+                            if (link) {
+                                const fullAddress = cell.getAttribute('data-full-address');
+                                if (fullAddress && link.textContent.includes('...')) {
+                                    link.textContent = fullAddress;
+                                }
+                            }
+                        }
+                    });
+                }
+            } else {
+                console.log("Table not found. Available elements:");
+                console.log("tableContent:", document.getElementById('tableContent'));
+                console.log("All tables:", document.querySelectorAll('table'));
+            }
+        }, 100);
+
+    } else {
+        console.log("Not in rich-list tab");
+        if (activeTab) {
+            console.log("Current tab:", activeTab.textContent.trim());
+        }
+    }
+}
+
+// Listen for window resize
+window.addEventListener('resize', fixsize);
 
 /**
  * Renders table for staking rich list
@@ -2035,24 +2554,30 @@ export async function updateStatsDisplay(stats) {
         const blocksToGoEl = document.querySelector('.stat-value-blocksToGo');
         if (blocksToGoEl && stats.blocksToReadjust) {
             const blocksToGo = parseInt(stats.blocksToReadjust);
-            // Approximate time: ~12 seconds per block on Base network
-            const secondsUntilAdjust = blocksToGo * 12;
-            const minutesUntilAdjust = Math.floor(secondsUntilAdjust / 60);
-            const hoursUntilAdjust = Math.floor(minutesUntilAdjust / 60);
+            // Use actual average reward time from contract stats (timePerEpoch in seconds)
+            const avgRewardTimeSeconds = stats.inflationMined?.timePerEpoch
+                ? parseFloat(stats.inflationMined.timePerEpoch)
+                : 12; // Fallback to 12 seconds if not available
+            const secondsUntilAdjust = blocksToGo * avgRewardTimeSeconds;
+            const minutesUntilAdjust = secondsUntilAdjust / 60;
+            const hoursUntilAdjust = minutesUntilAdjust / 60;
 
             let timeDisplay = '';
             let timeUnit = '';
 
             if (hoursUntilAdjust > 24) {
-                const days = Math.floor(hoursUntilAdjust / 24);
+                const days = hoursUntilAdjust / 24;
                 timeDisplay = days.toFixed(1);
                 timeUnit = 'days';
-            } else if (hoursUntilAdjust > 0) {
+            } else if (hoursUntilAdjust >= 1) {
                 timeDisplay = hoursUntilAdjust.toFixed(1);
                 timeUnit = 'hours';
-            } else {
-                timeDisplay = minutesUntilAdjust.toFixed(0);
+            } else if (minutesUntilAdjust >= 1) {
+                timeDisplay = minutesUntilAdjust.toFixed(1);
                 timeUnit = 'minutes';
+            } else {
+                timeDisplay = secondsUntilAdjust.toFixed(0);
+                timeUnit = 'seconds';
             }
 
             blocksToGoEl.innerHTML = `${blocksToGo.toLocaleString()} <span class="detail blocksToGoUnit">(~${timeDisplay} ${timeUnit})</span>`;
@@ -2083,7 +2608,7 @@ export async function updateStatsDisplay(stats) {
         const lastDiffBlockEl = document.querySelector('.stat-value-lastDiffBlock');
         if (lastDiffBlockEl && stats.latestDiffPeriod) {
             const blockNum = parseInt(stats.latestDiffPeriod);
-            lastDiffBlockEl.innerHTML = `${blockNum.toLocaleString()} <span class="detail lastDiffBlockDetail">(Base block)</span>`;
+            lastDiffBlockEl.innerHTML = `${blockNum} <span class="detail lastDiffBlockDetail">(Base block)</span>`;
         }
 
         // Update Last Difficulty Time
@@ -2116,16 +2641,63 @@ export async function updateStatsDisplay(stats) {
             const minted = parseFloat(stats.tokensMinted) / 1e18;
             const remaining = maxSupply - minted;
 
-            // Estimate blocks remaining (assuming ~50 B0x per block as average)
-            const avgRewardPerBlock = 50;
-            const blocksRemaining = Math.floor(remaining / avgRewardPerBlock);
+            // Use actual current reward from inflationMined
+            const currentReward = stats.inflationMined?.rewardsAtTime
+                ? parseFloat(stats.inflationMined.rewardsAtTime) / 1e18
+                : 50; // Fallback
+            const blocksRemaining = Math.floor(remaining / currentReward);
 
-            remainingSupplyEl.innerHTML = `${remaining.toLocaleString(undefined, {maximumFractionDigits: 0})} <span class="unit">B0x <span class="detail">(~${blocksRemaining.toLocaleString()} blocks)</span></span>`;
+            // Get actual average reward time in minutes
+            const avgRewardTimeSeconds = stats.inflationMined?.timePerEpoch
+                ? parseFloat(stats.inflationMined.timePerEpoch)
+                : 600; // Fallback to 10 minutes
+            const avgRewardTimeMinutes = avgRewardTimeSeconds / 60;
+
+            // Calculate total time in minutes
+            const totalMinutes = blocksRemaining * avgRewardTimeMinutes;
+            const totalHours = totalMinutes / 60;
+            const totalDays = totalHours / 24;
+            const totalMonths = totalDays / 30.44; // Average days per month
+            const totalYears = totalDays / 365.25;
+
+            // Format time display based on duration
+            let timeDisplay = '';
+            if (totalYears >= 1.5) {
+                timeDisplay = `~${totalYears.toFixed(1)} years`;
+            } else if (totalMonths >= 3) {
+                timeDisplay = `~${totalMonths.toFixed(1)} months`;
+            } else if (totalDays >= 5) {
+                timeDisplay = `~${totalDays.toFixed(1)} days`;
+            } else if (totalHours >= 12) {
+                timeDisplay = `~${totalHours.toFixed(1)} hours`;
+            } else {
+                timeDisplay = `~${totalMinutes.toFixed(1)} minutes`;
+            }
+
+            // Format avgRewardTimeMinutes for display
+            const avgTimeDisplay = avgRewardTimeMinutes >= 1
+                ? avgRewardTimeMinutes.toFixed(2)
+                : (avgRewardTimeSeconds).toFixed(1) + ' sec';
+            const avgTimeUnit = avgRewardTimeMinutes >= 1 ? 'min' : '';
+
+            remainingSupplyEl.innerHTML = `${remaining.toLocaleString(undefined, {maximumFractionDigits: 0})} <span class="unit">B0x <span class="detail">(~${blocksRemaining.toLocaleString()} blocks @ ${avgTimeDisplay} ${avgTimeUnit} per block = ${timeDisplay})</span></span>`;
         }
 
         // Update Mining Target (for reference, though not displayed in HTML)
         if (stats.miningTarget) {
             window.CURRENT_MINING_TARGET = stats.miningTarget;
+        }
+
+        // Update Last Base Block Number
+        const lastBaseBlockEl = document.querySelector('.stat-value-lastBaseBlock');
+        if (lastBaseBlockEl && stats.blockNumber) {
+            lastBaseBlockEl.textContent = parseInt(stats.blockNumber);
+        }
+
+        // Update Absolute Max Supply (fixed value: 31,165,100 B0x)
+        const absoluteMaxSupplyEl = document.querySelector('.stat-value-AbsoluteMaxSupply');
+        if (absoluteMaxSupplyEl) {
+            absoluteMaxSupplyEl.innerHTML = `${(31165100).toLocaleString()} <span class="unit">B0x</span>`;
         }
 
         // Update all mining and price stats
@@ -2223,14 +2795,21 @@ export function formatHashrate(hashrate) {
         { suffix: 'H/s', divisor: 1 }
     ];
 
+    // Format value based on magnitude: >50 = 0 decimals, >10 = 1 decimal, <10 = 2 decimals
+    const formatValue = (value) => {
+        if (value > 50) return value.toFixed(0);
+        if (value > 10) return value.toFixed(1);
+        return value.toFixed(2);
+    };
+
     for (const unit of units) {
         if (hashrate >= unit.divisor) {
             const value = hashrate / unit.divisor;
-            return `${value.toFixed(2)} ${unit.suffix}`;
+            return `${formatValue(value)} ${unit.suffix}`;
         }
     }
 
-    return `${hashrate.toFixed(2)} H/s`;
+    return `${formatValue(hashrate)} H/s`;
 }
 
 /**
@@ -2333,6 +2912,11 @@ export async function calculateAndDisplayHashrate() {
 
         prevHashrate = hashrate;
 
+        // Set estHashrate for miner-info calculations
+        if (typeof window.setEstHashrate === 'function') {
+            window.setEstHashrate(hashrate);
+        }
+
         // Update DOM element if it exists
         const hashrateEl = document.getElementById('hashrate');
         if (hashrateEl) {
@@ -2429,50 +3013,118 @@ export async function getTokenStats() {
     }
 }
 
+// Cache for B0x price calculations (5 minute TTL, persisted to localStorage)
+const B0X_PRICE_CACHE_KEY = 'b0xPriceCache';
+const B0X_PRICE_CACHE_TTL = 150000; // 2.5 minutes (150 seconds)
+
+// Load cache from localStorage on module load
+let b0xPriceCache = (() => {
+    try {
+        const stored = localStorage.getItem(B0X_PRICE_CACHE_KEY);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            // Validate the cached data has required fields
+            if (parsed.timestamp && parsed.ratioB0xTo0xBTC) {
+                console.log("Loaded B0x price from localStorage");
+                return parsed;
+            }
+        }
+    } catch (e) {
+        console.warn("Failed to load B0x price cache from localStorage:", e);
+    }
+    return { timestamp: 0, ratioB0xTo0xBTC: 0, usdCostB0x: 0 };
+})();
+
+/**
+ * Save B0x price cache to localStorage
+ * @param {Object} cache - Cache object to save
+ */
+function saveB0xPriceCache(cache) {
+    try {
+        localStorage.setItem(B0X_PRICE_CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {
+        console.warn("Failed to save B0x price cache to localStorage:", e);
+    }
+}
+
 /**
  * Calculate B0x to 0xBTC ratio and USD price
- * Uses swap contract to get exchange rate
+ * Uses cached data from SUPER COMBINED MULTICALL when available
+ * Falls back to direct RPC call if needed
+ * Caches results for 5 minutes (persisted to localStorage)
+ * @param {boolean} forceUpdate - Force a fresh calculation ignoring cache
  * @returns {Promise<{ratioB0xTo0xBTC: number, usdCostB0x: number}>}
  */
-export async function calculateB0xPrice() {
+export async function calculateB0xPrice(forceUpdate = false) {
     try {
-        const tokenSwapperABI = [
-            {
-                "inputs": [
-                    { "name": "tokenZeroxBTC", "type": "address" },
-                    { "name": "tokenBZeroX", "type": "address" },
-                    { "name": "tokenIn", "type": "address" },
-                    { "name": "hookAddress", "type": "address" },
-                    { "name": "amountIn", "type": "uint128" }
-                ],
-                "name": "getOutput",
-                "outputs": [{ "name": "amountOut", "type": "uint256" }],
-                "stateMutability": "view",
-                "type": "function"
-            }
-        ];
+        const now = Date.now();
+        const cacheAge = now - b0xPriceCache.timestamp;
 
-        const provider = new ethers.providers.JsonRpcProvider(customRPC);
-        const tokenSwapperContract = new ethers.Contract(
-            contractAddress_Swapper,
-            tokenSwapperABI,
-            provider
-        );
+        // Return cached values if cache is still valid and not forcing update
+        if (!forceUpdate && b0xPriceCache.timestamp > 0 && cacheAge < B0X_PRICE_CACHE_TTL) {
+            const remainingSeconds = Math.ceil((B0X_PRICE_CACHE_TTL - cacheAge) / 1000);
+            console.log(`Using cached B0x price (refreshes in ${remainingSeconds}s)`);
 
-        const tokenInputAddress = tokenAddresses['B0x'];
-        const amountToSwap = BigInt(10 ** 18);
+            // Update USD price with current 0xBTC price (might have changed)
+            const oxbtcPrice = window.oxbtcPriceUSD || 0;
+            window.ratioB0xTo0xBTC = b0xPriceCache.ratioB0xTo0xBTC;
+            window.usdCostB0x = b0xPriceCache.ratioB0xTo0xBTC * oxbtcPrice;
 
-        const result = await tokenSwapperContract.callStatic.getOutput(
-            tokenAddresses['0xBTC'],
-            tokenAddresses['B0x'],
-            tokenInputAddress,
-            hookAddress,
-            amountToSwap
-        );
+            return { ratioB0xTo0xBTC: window.ratioB0xTo0xBTC, usdCostB0x: window.usdCostB0x };
+        }
+
+        let swapResult = null;
+
+        // First, try to use cached data from SUPER COMBINED MULTICALL (getRewardStats)
+        if (window.rewardStatsCache &&
+            window.rewardStatsCache.data &&
+            window.rewardStatsCache.data.tokenSwapperResult &&
+            (now - window.rewardStatsCache.timestamp) < B0X_PRICE_CACHE_TTL) {
+
+            console.log("Using tokenSwapper result from SUPER COMBINED MULTICALL");
+            swapResult = window.rewardStatsCache.data.tokenSwapperResult;
+        }
+
+        // If no cached multicall data, make direct RPC call
+        if (!swapResult) {
+            const tokenSwapperABI = [
+                {
+                    "inputs": [
+                        { "name": "tokenZeroxBTC", "type": "address" },
+                        { "name": "tokenBZeroX", "type": "address" },
+                        { "name": "tokenIn", "type": "address" },
+                        { "name": "hookAddress", "type": "address" },
+                        { "name": "amountIn", "type": "uint128" }
+                    ],
+                    "name": "getOutput",
+                    "outputs": [{ "name": "amountOut", "type": "uint256" }],
+                    "stateMutability": "view",
+                    "type": "function"
+                }
+            ];
+
+            const provider = new ethers.providers.JsonRpcProvider(customRPC);
+            const tokenSwapperContract = new ethers.Contract(
+                contractAddress_Swapper,
+                tokenSwapperABI,
+                provider
+            );
+
+            const tokenInputAddress = tokenAddresses['B0x'];
+            const amountToSwap = BigInt(10 ** 18);
+
+            swapResult = await tokenSwapperContract.callStatic.getOutput(
+                tokenAddresses['0xBTC'],
+                tokenAddresses['B0x'],
+                tokenInputAddress,
+                hookAddress,
+                amountToSwap
+            );
+        }
 
         // Convert to proper numbers
-        const amountOutNumber = Number(result) / (10 ** 8); // 0xBTC has 8 decimals
-        const amountToSwapNumber = Number(amountToSwap) / (10 ** 18); // B0x has 18 decimals
+        const amountOutNumber = Number(swapResult) / (10 ** 8); // 0xBTC has 8 decimals
+        const amountToSwapNumber = 1; // We're calculating for 1 B0x (10^18 / 10^18)
         const exchangeRate = amountOutNumber / amountToSwapNumber; // 0xBTC per B0x
 
         // Get current 0xBTC price
@@ -2482,9 +3134,16 @@ export async function calculateB0xPrice() {
         window.ratioB0xTo0xBTC = exchangeRate;
         window.usdCostB0x = exchangeRate * oxbtcPrice;
 
+        // Update cache and persist to localStorage
+        b0xPriceCache = {
+            timestamp: now,
+            ratioB0xTo0xBTC: exchangeRate,
+            usdCostB0x: window.usdCostB0x
+        };
+        saveB0xPriceCache(b0xPriceCache);
+
         console.log("B0x to 0xBTC ratio:", window.ratioB0xTo0xBTC);
         console.log("USD cost of B0x:", window.usdCostB0x);
-        console.log("0xBTC price used:", oxbtcPrice);
 
         if (oxbtcPrice === 0) {
             console.warn("Warning: 0xBTC price is 0, USD cost will be 0");
@@ -2493,6 +3152,14 @@ export async function calculateB0xPrice() {
         return { ratioB0xTo0xBTC: window.ratioB0xTo0xBTC, usdCostB0x: window.usdCostB0x };
     } catch (error) {
         console.error("Error calculating B0x price:", error);
+        // Try to return cached values on error
+        if (b0xPriceCache.ratioB0xTo0xBTC > 0) {
+            console.log("Returning stale cached B0x price due to error");
+            const oxbtcPrice = window.oxbtcPriceUSD || 0;
+            window.ratioB0xTo0xBTC = b0xPriceCache.ratioB0xTo0xBTC;
+            window.usdCostB0x = b0xPriceCache.ratioB0xTo0xBTC * oxbtcPrice;
+            return { ratioB0xTo0xBTC: window.ratioB0xTo0xBTC, usdCostB0x: window.usdCostB0x };
+        }
         return { ratioB0xTo0xBTC: 0, usdCostB0x: 0 };
     }
 }
@@ -2745,7 +3412,8 @@ export async function updateAllMiningStats(forceUpdate = false) {
         // Extract values from multicall result
         const rewardPerSolve = parseFloat(contractStats.inflationMined.rewardsAtTime) / 1e18;
         const avgRewardTime = parseFloat(contractStats.inflationMined.timePerEpoch);
-        const difficulty = parseFloat(contractStats.miningDifficulty);
+        // miningDifficulty from contract needs to be divided by 524288
+        const difficulty = parseFloat(contractStats.miningDifficulty) / 524288;
 
         const stats = {
             price: b0xPriceData.usdCostB0x,
@@ -2764,6 +3432,7 @@ export async function updateAllMiningStats(forceUpdate = false) {
             tokenHolders: tokenHolders.TokenHolders,
             tokenTransfers: tokenHolders.Transfers,
             // Additional multicall data
+            blockNumber: contractStats.blockNumber,
             miningTarget: contractStats.miningTarget,
             tokensMinted: contractStats.tokensMinted,
             maxSupplyForEra: contractStats.maxSupplyForEra,
@@ -2849,6 +3518,88 @@ export function updateMiningStatsDisplay(stats) {
             txsEl.textContent = stats.tokenTransfers.toLocaleString() + " txs"
         }
 
+        // Update Mining Calculator values
+        // Calculate difficulty from miningTarget: difficulty = (2^253 / miningTarget) / 524288
+        let currentDiff = stats.difficulty;
+        if (stats.miningTarget && !currentDiff) {
+            const miningTargetBig = BigInt(stats.miningTarget);
+            if (miningTargetBig > 0n) {
+                const twoPow253 = BigInt(2) ** BigInt(253);
+                currentDiff = Number(twoPow253 / miningTargetBig) / 524288;
+            }
+        }
+
+        // Calculate next difficulty from readjustDifficulty (raw value / 524288)
+        let nextDiff = 0;
+        if (stats.readjustDifficulty) {
+            nextDiff = parseFloat(stats.readjustDifficulty) / 524288;
+        }
+
+        // Update difficulty display with next diff info
+        const difficultyEl2 = document.querySelector('.stat-value-difficulty');
+        if (difficultyEl2 && currentDiff) {
+            // Format: toFixed(0) if >= 100, toFixed(3) if < 100, then toLocaleString
+            const formatDiff = (diff) => {
+                if (diff >= 100) {
+                    return parseFloat(diff).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                } else {
+                    return parseFloat(diff).toFixed(3).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                }
+            };
+            difficultyEl2.innerHTML = `${formatDiff(currentDiff)} <span class="detail">(next: ${formatDiff(nextDiff)})</span>`;
+        }
+
+        // Update average reward time display with unit
+        const avgRewardEl2 = document.querySelector('.stat-value-averageRewardTime');
+        if (avgRewardEl2 && stats.avgRewardTime) {
+            // Convert to human readable time
+            const avgTime = stats.avgRewardTime;
+            let displayValue, displayUnit;
+            if (avgTime < 60) {
+                displayValue = avgTime.toFixed(1);
+                displayUnit = 'seconds';
+            } else if (avgTime < 3600) {
+                displayValue = (avgTime / 60).toFixed(2);
+                displayUnit = 'minutes';
+            } else {
+                displayValue = (avgTime / 3600).toFixed(2);
+                displayUnit = 'hours';
+            }
+            avgRewardEl2.innerHTML = `${displayValue} <span class="detail avgRewardUnit">${displayUnit}</span>`;
+        }
+
+        // Set mining calculator values
+        if (currentDiff) {
+            setCurrentDifficulty(currentDiff);
+        }
+        if (nextDiff) {
+            setNextDifficulty(nextDiff);
+        }
+        if (stats.rewardPerSolve) {
+            setRewardPerSolve(stats.rewardPerSolve);
+        }
+        if (stats.blocksToReadjust) {
+            setBlocksToGo(stats.blocksToReadjust);
+        }
+        if (stats.avgRewardTime) {
+            // Store the raw value for calculations
+            setAvgRewardTime(stats.avgRewardTime < 60 ? stats.avgRewardTime : stats.avgRewardTime / 60);
+        }
+
+        // Update difficulty input and trigger calculation
+        const difficultyInput = document.getElementById('difficulty-input');
+        if (difficultyInput && currentDiff) {
+            // Format: toFixed(0) if >= 10, toFixed(2) if < 10
+            difficultyInput.value = currentDiff >= 10 ? parseFloat(currentDiff).toFixed(0) : parseFloat(currentDiff).toFixed(2);
+        }
+
+        // Trigger mining calculator recalculation
+        try {
+            calculateMining();
+        } catch (calcError) {
+            console.warn('Mining calculator recalculation failed:', calcError);
+        }
+
         console.log('✓ Mining stats display updated');
 
     } catch (error) {
@@ -2883,6 +3634,7 @@ export default {
     // Tab switching
     switchTab,
     switchTabForStats,
+    showStatsPageDirect,
     switchTab2,
     updateURL,
 
@@ -2896,10 +3648,12 @@ export default {
     handleWidgetVisibility,
 
     // Token icons
+    updateTokenIconCore,
     updateTokenIcon,
     updateTokenIconETH,
     updateTokenIconCreate,
     updateTokenSelection,
+    initTokenIconListeners,
 
     // Token filters
     filterTokenOptionsCreate,
@@ -2943,5 +3697,10 @@ export default {
 
     // Rich List Data Loading
     loadData2,
-    loadData
+    loadData,
+
+    // Rich List Controls
+    changePage,
+    filterData2,
+    initRichListEventListeners
 };

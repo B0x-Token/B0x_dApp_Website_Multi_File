@@ -1855,52 +1855,7 @@ function updateTokenIcon(selectId, iconId) {
 
 
 
-function updateTokenIconCreate() {
-    const formGroups = document.querySelectorAll('#create .form-group');
-
-    formGroups.forEach(group => {
-        const label = group.querySelector('label');
-        const select = group.querySelector('select');
-        const icon = group.querySelector('.token-icon');
-
-        if (label && select && icon) {
-            const labelText = label.textContent;
-            if (labelText === 'Token A' || labelText === 'Token B') {
-                const selectedValue = select.value;
-
-                const tokenIcons = {
-                    'ETH': 'E',
-                    'USDC': 'U',
-                    'DAI': 'D',
-                    'WBTC': 'W'
-                };
-
-                const iconURL = tokenIconsBase[selectedValue]; // Get the icon URL
-
-                if (iconURL) {
-                    // Use image if URL exists
-                    icon.innerHTML = `<img src="${iconURL}" alt="${selectedValue}" class="token-icon222" onerror="this.parentElement.textContent='${selectedValue.charAt(0)}'">`;
-                } else {
-                    // Fallback to first letter if no URL
-                    icon.textContent = selectedValue.charAt(0);
-                }
-            }
-        }
-    });
-
-    filterTokenOptionsCreate();
-}
-
-
-
-
-// Add event listeners when page loads
-document.addEventListener('DOMContentLoaded', function () {
-    const createSelects = document.querySelectorAll('#create .token-selector select');
-    createSelects.forEach(select => {
-        select.addEventListener('change', updateTokenIconCreate);
-    });
-});
+// updateTokenIconCreate and its listeners are now handled by ui.js and initTokenIconListeners()
 
 
 
@@ -17458,10 +17413,7 @@ function updateTokenIcon(selectId, iconId) {
 
 
 
-// Add event listener to token selector
-document.getElementById('fromToken').addEventListener('change', function () {
-    updateTokenIcon('fromToken', 'fromTokenIcon');
-});
+// Token selector listeners are now handled by initTokenIconListeners() in ui.js
 
 
 // Function to update token icon and clear amount field
@@ -17496,10 +17448,7 @@ function updateTokenIconETH(selectId, iconId) {
 }
 
 
-// Add event listener to token selector
-document.getElementById('fromToken').addEventListener('change', function () {
-    updateTokenIconETH('fromToken', 'fromTokenIcon');
-});
+// Token selector listener handled by initTokenIconListeners() in ui.js
 
 
 async function swapTokensConvert() {

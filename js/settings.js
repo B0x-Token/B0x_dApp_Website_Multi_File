@@ -379,11 +379,23 @@ export function restoreDefaultAddresses() {
  */
 export async function restoreDefaultAddressesfromContract() {
     if (!window.walletConnected) {
-        showToast('Connect wallet first', true);
+        console.log('restoreDefaultAddressesfromContract: wallet not connected, skipping');
+        return;
+    }
+
+    if (!window.provider) {
+        console.log('restoreDefaultAddressesfromContract: provider not ready, skipping');
         return;
     }
 
     try {
+        // Check if we're on the right network (Base = chainId 8453)
+        const network = await window.provider.getNetwork();
+        if (network.chainId !== 8453) {
+            console.log('restoreDefaultAddressesfromContract: not on Base network, skipping');
+            return;
+        }
+
         console.log('Getting reward tokens from contract...');
 
         const getRewardTokensABI = [
@@ -426,8 +438,8 @@ export async function restoreDefaultAddressesfromContract() {
         console.log('Addresses restored from contract:', tokenAddresses);
         showToast('Contract addresses loaded from blockchain');
     } catch (error) {
-        console.error('Error loading settings from contract:', error);
-        showToast('Failed to load addresses from contract', true);
+        // Silently fail for non-critical operation - just log a warning
+        console.warn('Could not load settings from contract (non-critical):', error.message || error);
     }
 }
 
@@ -437,11 +449,11 @@ export async function restoreDefaultAddressesfromContract() {
  * @returns {Promise<void>}
  */
 export async function restoreDefaultAddressesfromGithub() {
-    console.log("Using data source:", customDataSource);
+    console.log("Using data source: http://bzerox.org/data/githubERC20RewardsTestnet.json");
     console.log("Backup data source:", customBACKUPDataSource);
 
     try {
-        const response = await fetch(customDataSource + 'githubERC20RewardsTestnet.json');
+        const response = await fetch('http://bzerox.org/data/githubERC20RewardsTestnet.json');
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);

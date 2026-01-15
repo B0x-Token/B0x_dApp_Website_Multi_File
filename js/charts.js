@@ -543,10 +543,8 @@ export async function initializeChart(loadSettings, customDataSource, customBACK
                                     let label = labels[index];
 
                                     if (totalPoints - showEvery < index && index != totalPoints - 1) {
-                                        console.log("not showing index: ", index);
                                         return null;
                                     }
-                                    console.log("label1: ", label);
                                     if (label.includes('min ago')) {
                                         const min = parseFloat(label);
                                         const result = min + " min ago";

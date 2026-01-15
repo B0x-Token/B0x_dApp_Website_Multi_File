@@ -22,7 +22,7 @@ import { showSuccessNotification, showErrorNotification, showInfoNotification, h
 import { POSITION_FINDER_ABI } from './abis.js';
 import { getSqrtRatioAtTick, approveTokensViaPermit2, toBigNumber } from './contracts.js';
 import { getSymbolFromAddress, tokenAddressesDecimals, fetchBalances } from './utils.js';
-import { getNFTOwners } from './data-loader.js';
+import { getNFTOwners, isSearchingLogs } from './data-loader.js';
 import { updateStakingValues } from './staking.js';
 // ============================================
 // STATE VARIABLES
@@ -58,8 +58,10 @@ let nftOwners = {};
 // APYFINAL is now stored on window object (set in staking.js)
 let WhereToStartSearch = 0;
 let WhereToStartSearchStaked = 0;
-let WeAreSearchingLogsRightNow = false;
+// WeAreSearchingLogsRightNow is now imported from data-loader.js via isSearchingLogs()
 let inFunctionDontRefresh = false;
+// Sync with window for countdown.js access
+window.inFunctionDontRefresh = false;
 
 // Button state tracking
 const buttonStates = {};
@@ -213,8 +215,10 @@ function disableButtonWithSpinner(ID, msg = '<span class="spinner"></span> Appro
         msg == "No positions to increase Liquidity on, stake a position first" ||
         msg == "No positions to decrease Liquidity on, stake a position first") {
         inFunctionDontRefresh = false;
+        window.inFunctionDontRefresh = false;
     } else {
         inFunctionDontRefresh = true;
+        window.inFunctionDontRefresh = true;
     }
 
     const btn = document.getElementById(ID);
@@ -251,6 +255,7 @@ function enableButton(ID, originalText = null) {
 
     isEnabled(ID, true);
     inFunctionDontRefresh = false;
+    window.inFunctionDontRefresh = false;
 
     const btn = document.getElementById(ID);
     if (!btn) {
@@ -608,6 +613,8 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
                 currentTokenB: formattedToken2,
                 tokenAIcon: tokenASymbol ? tokenASymbol[0] : "?",
                 tokenBIcon: tokenBSymbol ? tokenBSymbol[0] : "?",
+                unclaimedFeesTokenA: 0,
+                unclaimedFeesTokenB: 0,
                 apy: (window.APYFINAL || 0).toFixed(2) + "%",
                 PenaltyForWithdraw: penaltyWithdrawString
             };
@@ -662,9 +669,9 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
             window.signer
         );
 
-        while (WeAreSearchingLogsRightNow) {
+        while (isSearchingLogs()) {
             await sleep(1000);
-            console.log("Waiting for log search to complete");
+            console.log("Waiting for log search to complete...");
         }
         nftOwners = await getNFTOwners();
         // Get user token IDs from nftOwners mapping
@@ -1528,6 +1535,7 @@ export async function loadPositionsIntoDappSelections() {
     console.log("=== loadPositionsIntoDappSelections() called ===");
     console.log("positionData count:", Object.keys(positionData).length);
     console.log("stakingPositionData count:", Object.keys(stakingPositionData).length);
+    console.log("Populating all position selectors (regular + staking)...");
 
     // Set up position selector for regular increase
     const positionSelect = document.querySelector('#increase select');
@@ -1640,6 +1648,113 @@ export async function loadPositionsIntoDappSelections() {
             updateDecreasePositionInfo();
         }
     }
+
+    // ========================================
+    // STAKING POSITION SELECTORS
+    // ========================================
+
+    // Staking main page - deposit NFT selector (uses positionData)
+    const stakingMainPageSelect = document.querySelector('#staking-main-page select');
+    if (stakingMainPageSelect) {
+        const currentStakingValue = stakingMainPageSelect.value;
+        stakingMainPageSelect.innerHTML = '';
+
+        if (Object.keys(positionData).length > 0) {
+            Object.values(positionData).forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+                stakingMainPageSelect.appendChild(option);
+            });
+
+            // Restore selection if it still exists
+            if (currentStakingValue && stakingMainPageSelect.querySelector(`option[value="${currentStakingValue}"]`)) {
+                stakingMainPageSelect.value = currentStakingValue;
+            }
+        }
+    }
+
+    // Staking main page - withdraw NFT selector (uses stakingPositionData)
+    const withdrawNFTSelect = document.querySelector('#staking-main-page .form-group2 select');
+    if (withdrawNFTSelect) {
+        const currentWithdrawValue = withdrawNFTSelect.value;
+        withdrawNFTSelect.innerHTML = '';
+
+        if (Object.keys(stakingPositionData).length > 0) {
+            Object.values(stakingPositionData).forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                withdrawNFTSelect.appendChild(option);
+            });
+
+            // Restore selection if it still exists
+            if (currentWithdrawValue && withdrawNFTSelect.querySelector(`option[value="${currentWithdrawValue}"]`)) {
+                withdrawNFTSelect.value = currentWithdrawValue;
+            }
+
+            // Update the position info display
+            if (typeof window.updatePositionInfoMAIN_UNSTAKING === 'function') {
+                window.updatePositionInfoMAIN_UNSTAKING();
+            }
+        }
+    }
+
+    // Stake increase position selector (uses stakingPositionData)
+    const stakeIncreaseSelect = document.querySelector('#stake-increase select');
+    if (stakeIncreaseSelect) {
+        const currentIncreaseValue = stakeIncreaseSelect.value;
+        stakeIncreaseSelect.innerHTML = '';
+
+        if (Object.keys(stakingPositionData).length > 0) {
+            Object.values(stakingPositionData).forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                stakeIncreaseSelect.appendChild(option);
+            });
+
+            // Restore selection if it still exists
+            if (currentIncreaseValue && stakeIncreaseSelect.querySelector(`option[value="${currentIncreaseValue}"]`)) {
+                stakeIncreaseSelect.value = currentIncreaseValue;
+            }
+
+            // Update the position info display
+            if (typeof window.updateStakePositionInfo === 'function') {
+                window.updateStakePositionInfo();
+            }
+        }
+    }
+
+    // Stake decrease position selector (uses stakingPositionData)
+    const stakeDecreaseSelect = document.querySelector('#stake-decrease select');
+    if (stakeDecreaseSelect) {
+        const currentDecreaseValue = stakeDecreaseSelect.value;
+        stakeDecreaseSelect.innerHTML = '';
+
+        if (Object.keys(stakingPositionData).length > 0) {
+            Object.values(stakingPositionData).forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                stakeDecreaseSelect.appendChild(option);
+            });
+
+            // Restore selection if it still exists
+            if (currentDecreaseValue && stakeDecreaseSelect.querySelector(`option[value="${currentDecreaseValue}"]`)) {
+                stakeDecreaseSelect.value = currentDecreaseValue;
+            }
+
+            // Update the position info display
+            if (typeof window.updateStakeDecreasePositionInfo === 'function') {
+                window.updateStakeDecreasePositionInfo();
+            }
+        }
+    }
+
+    // ========================================
+    // UPDATE BUTTON STATES
+    // ========================================
 
     // Update button states
     if (Object.keys(positionData).length === 0) {

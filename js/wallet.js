@@ -319,29 +319,100 @@ export async function connectWallet(resumeFromStep = null) {
             await switchToBase();
         }
 
-        // Step 2: Fetch Base balances
-        if (!resumeFromStep || resumeFromStep === 'fetchBalances') {
-            await switchToBase();
-            if (window.fetchBalances && userAddress) {
-                await withNetworkRetry(() => window.fetchBalances(
-                    userAddress,
-                    window.tokenAddresses,
-                    window.tokenAddressesDecimals,
-                    window.fetchTokenBalanceWithEthers,
-                    window.displayWalletBalances,
-                    provider,
-                    signer,
-                    walletConnected,
-                    connectWallet
-                ), 3, 'fetchBalances');
+        // Reset position data first (quick, no RPC)
+        if (window.resetPositionData) {
+            window.resetPositionData();
+        }
+
+        // PARALLEL GROUP 1: Fetch balances from both chains simultaneously
+        console.log("Fetching balances in parallel...");
+        const balancePromises = [];
+
+        if (window.fetchBalances && userAddress) {
+            balancePromises.push(
+                switchToBase().then(() =>
+                    withNetworkRetry(() => window.fetchBalances(
+                        userAddress,
+                        window.tokenAddresses,
+                        window.tokenAddressesDecimals,
+                        window.fetchTokenBalanceWithEthers,
+                        window.displayWalletBalances,
+                        provider,
+                        signer,
+                        walletConnected,
+                        connectWallet
+                    ), 2, 'fetchBalances')
+                ).catch(e => console.warn('fetchBalances error:', e))
+            );
+        }
+
+        // Note: ETH balances fetched separately due to network switching
+        // Can be deferred or run after main content loads
+
+        await Promise.all(balancePromises);
+        await switchToBase();
+
+        // PARALLEL GROUP 2: Run independent data fetches simultaneously
+        console.log("Fetching wallet data in parallel...");
+        const dataPromises = [];
+
+        // Get reward stats (includes contract stats via multicall)
+        if (window.getRewardStats) {
+            dataPromises.push(
+                withNetworkRetry(() => window.getRewardStats(), 2, 'getRewardStats')
+                    .catch(e => console.warn('getRewardStats error:', e))
+            );
+        }
+
+        // Check admin access (independent)
+        if (window.checkAdminAccess) {
+            dataPromises.push(
+                withNetworkRetry(() => window.checkAdminAccess(), 2, 'checkAdmin')
+                    .catch(e => console.warn('checkAdminAccess error:', e))
+            );
+        }
+
+        // Get price ratio (independent)
+        if (window.throttledGetSqrtRtAndPriceRatio) {
+            dataPromises.push(
+                withNetworkRetry(() => window.throttledGetSqrtRtAndPriceRatio("ConnectWallet"), 2, 'getPriceData')
+                    .catch(e => console.warn('getPriceData error:', e))
+            );
+        }
+
+        await Promise.all(dataPromises);
+
+        // SEQUENTIAL: These depend on previous data
+        // Get token IDs (needs position data from runContinuous)
+        if (window.getTokenIDsOwnedByMetamask) {
+            try {
+                await withNetworkRetry(() => window.getTokenIDsOwnedByMetamask(), 2, 'getTokenIDs');
+            } catch (e) {
+                console.warn('getTokenIDs error:', e);
             }
         }
 
-        // Step 3: Fetch ETH balances
-        if (!resumeFromStep || ['fetchBalances', 'fetchBalancesETH'].includes(resumeFromStep)) {
-            await switchToEthereum();
-            if (window.fetchBalancesETH && userAddress) {
-                await withNetworkRetry(() => window.fetchBalancesETH(
+        // Load positions into UI (needs token IDs)
+        if (window.loadPositionsIntoDappSelections) {
+            try {
+                await withNetworkRetry(() => window.loadPositionsIntoDappSelections(), 2, 'loadPositions');
+            } catch (e) {
+                console.warn('loadPositions error:', e);
+            }
+        }
+
+        // Restore addresses if needed (low priority)
+        const toggle1 = document.getElementById('toggle1');
+        if (toggle1 && toggle1.checked && window.restoreDefaultAddressesfromContract) {
+            console.log("contractAddresses MATCH");
+            withNetworkRetry(() => window.restoreDefaultAddressesfromContract(), 2, 'restoreAddresses')
+                .catch(e => console.warn('restoreAddresses error:', e));
+        }
+
+        // Fetch ETH balances in background (non-blocking)
+        if (window.fetchBalancesETH && userAddress) {
+            switchToEthereum().then(() =>
+                withNetworkRetry(() => window.fetchBalancesETH(
                     userAddress,
                     window.tokenAddressesETH,
                     window.tokenAddressesDecimalsETH,
@@ -351,80 +422,12 @@ export async function connectWallet(resumeFromStep = null) {
                     signerETH,
                     walletConnected,
                     connectWallet
-                ), 3, 'fetchBalancesETH');
-            }
-            await switchToBase();
+                ), 2, 'fetchBalancesETH')
+            ).then(() => switchToBase())
+            .catch(e => console.warn('fetchBalancesETH error:', e));
         }
 
-        // Step 4: Initialize position data
-        if (!resumeFromStep || ['fetchBalances', 'fetchBalancesETH', 'initPositions'].includes(resumeFromStep)) {
-            if (window.resetPositionData) {
-                window.resetPositionData();
-            }
-        }
-
-        // Step 4.5: Get reward stats
-        if (!resumeFromStep || resumeFromStep === 'getRewardStats') {
-            await sleep(300);
-            if (window.getRewardStats) {
-                await withNetworkRetry(() => window.getRewardStats(), 3, 'getRewardStats');
-            }
-        }
-
-        // Step 5: Get token IDs
-        if (!resumeFromStep || resumeFromStep === 'getTokenIDs') {
-            await sleep(300);
-            if (window.getTokenIDsOwnedByMetamask) {
-                await withNetworkRetry(() => window.getTokenIDsOwnedByMetamask(), 3, 'getTokenIDs');
-            }
-        }
-
-        // Step 6: Check admin access
-        if (!resumeFromStep || resumeFromStep === 'checkAdmin') {
-            await sleep(300);
-            if (window.checkAdminAccess) {
-                await withNetworkRetry(() => window.checkAdminAccess(), 3, 'checkAdmin');
-            }
-        }
-
-        // Step 7: Load positions
-        if (!resumeFromStep || resumeFromStep === 'loadPositions') {
-            await sleep(300);
-            if (window.loadPositionsIntoDappSelections) {
-                await withNetworkRetry(() => window.loadPositionsIntoDappSelections(), 3, 'loadPositions');
-            }
-        }
-
-        // Step 8: Get price data
-        if (!resumeFromStep || resumeFromStep === 'getPriceData') {
-            await sleep(300);
-            if (window.throttledGetSqrtRtAndPriceRatio) {
-                await withNetworkRetry(() => window.throttledGetSqrtRtAndPriceRatio("ConnectWallet"), 3, 'getPriceData');
-            }
-        }
-
-        // Step 9: Restore addresses if needed
-        if (!resumeFromStep || resumeFromStep === 'restoreAddresses') {
-            const toggle1 = document.getElementById('toggle1');
-            if (toggle1 && toggle1.checked && window.restoreDefaultAddressesfromContract) {
-                console.log("contractAddresses MATCH");
-                await withNetworkRetry(() => window.restoreDefaultAddressesfromContract(), 3, 'restoreAddresses');
-            }
-        }
-
-        // Step 11: Get APY
-        if (!resumeFromStep || resumeFromStep === 'getAPY') {
-            await sleep(300);
-            if (window.GetRewardAPY) {
-              //  await withNetworkRetry(() => window.GetRewardAPY(), 3, 'getAPY');
-            }
-        }
-
-        // Step 12: Final admin check
-        if (window.checkAdminAccess) {
-            await withNetworkRetry(() => window.checkAdminAccess(), 3, 'finalAdminCheck');
-        }
-
+        console.log('✓ Wallet connection complete');
         connectionState.isRecovering = false;
         connectionState.lastStep = 'completed';
 
@@ -678,6 +681,7 @@ export async function setupWalletListeners() {
         } else {
             const olduserAddy = userAddress;
             userAddress = accounts[0];
+            window.userAddress = userAddress;
 
             // Clear manual selections when switching accounts
             if (typeof window.userManualSelection !== 'undefined') window.userManualSelection = null;
@@ -687,19 +691,117 @@ export async function setupWalletListeners() {
             if (typeof window.userManualSelectionStakeDecrease !== 'undefined') window.userManualSelectionStakeDecrease = null;
             if (typeof window.userManualSelectionWithdraw !== 'undefined') window.userManualSelectionWithdraw = null;
 
+            // Update localStorage
+            localStorage.setItem('walletAddress', userAddress);
+
             updateWalletUI(userAddress, true);
-
-
-
 
             // Call connect2 if available on window
             if (window.connect2) {
                 await window.connect2();
             }
 
-                updateStakingValues([totalStakedAmounts.token0, totalStakedAmounts.token1], window.APYFINAL);
+            // Reset position data for new account
+            if (window.resetPositionData) {
+                window.resetPositionData();
+            }
+            if (window.resetPositionSearch) {
+                window.resetPositionSearch();
+            }
 
+            // Fetch balances for new account
+            await switchToBase();
+            if (window.fetchBalances && userAddress) {
+                try {
+                    await window.fetchBalances(
+                        userAddress,
+                        window.tokenAddresses,
+                        window.tokenAddressesDecimals,
+                        window.fetchTokenBalanceWithEthers,
+                        window.displayWalletBalances,
+                        provider,
+                        signer,
+                        walletConnected,
+                        connectWallet
+                    );
+                } catch (e) {
+                    console.warn('Failed to fetch balances on account change:', e);
+                }
+            }
 
+            // Get reward stats and staking data
+            if (window.getRewardStats) {
+                try {
+                    await window.getRewardStats();
+                } catch (e) {
+                    console.warn('Failed to get reward stats on account change:', e);
+                }
+            }
+
+            // Get token IDs owned by new account
+            if (window.getTokenIDsOwnedByMetamask) {
+                try {
+                    await window.getTokenIDsOwnedByMetamask();
+                } catch (e) {
+                    console.warn('Failed to get token IDs on account change:', e);
+                }
+            }
+
+            // Load positions into UI
+            if (window.loadPositionsIntoDappSelections) {
+                try {
+                    await window.loadPositionsIntoDappSelections();
+                } catch (e) {
+                    console.warn('Failed to load positions on account change:', e);
+                }
+            }
+
+            // Update staking stats
+            if (window.updateStakingStats) {
+                window.updateStakingStats();
+            }
+
+            // Update staking values
+            updateStakingValues([totalStakedAmounts.token0, totalStakedAmounts.token1], window.APYFINAL);
+
+            // Update all position info displays for the new account
+            if (window.updatePositionInfo) {
+                window.updatePositionInfo();
+            }
+            if (window.updatePositionInfoMAIN_STAKING) {
+                window.updatePositionInfoMAIN_STAKING();
+            }
+            if (window.updatePositionInfoMAIN_UNSTAKING) {
+                window.updatePositionInfoMAIN_UNSTAKING();
+            }
+            if (window.updateStakePositionInfo) {
+                window.updateStakePositionInfo();
+            }
+            if (window.updatePositionInfoStaking) {
+                window.updatePositionInfoStaking();
+            }
+            if (window.updatePositionInfoUnstaking) {
+                window.updatePositionInfoUnstaking();
+            }
+            if (window.updatePositionInfoIncreaseStaking) {
+                window.updatePositionInfoIncreaseStaking();
+            }
+            if (window.updatePositionInfoDecreaseStaking) {
+                window.updatePositionInfoDecreaseStaking();
+            }
+            if (window.updatePositionInfoIncrease) {
+                window.updatePositionInfoIncrease();
+            }
+            if (window.updatePositionInfoDecrease) {
+                window.updatePositionInfoDecrease();
+            }
+
+            // Update widget
+            if (window.updateWidget) {
+                await window.updateWidget();
+            }
+
+            console.log('✓ Account change data refresh complete');
         }
     });
 
