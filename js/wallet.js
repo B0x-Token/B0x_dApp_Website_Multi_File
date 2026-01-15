@@ -129,6 +129,7 @@ function sleep(ms) {
 
 /**
  * Check if wallet was previously connected and auto-connect
+ * Does minimal setup quickly, data loading happens in background
  */
 export async function checkWalletConnection() {
     console.log("Checking wallet connection");
@@ -139,7 +140,17 @@ export async function checkWalletConnection() {
             });
 
             if (accounts.length > 0) {
-                await connectWallet();
+                // Quick minimal setup - don't block on full connectWallet
+                userAddress = accounts[0];
+                walletConnected = true;
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                signer = provider.getSigner();
+
+                // Update UI immediately
+                await updateWalletUI(userAddress, true);
+
+                // Run full data loading in background (non-blocking)
+                connectWallet().catch(e => console.warn('Background wallet data loading:', e));
             }
         } catch (error) {
             console.error('Error checking wallet connection:', error);

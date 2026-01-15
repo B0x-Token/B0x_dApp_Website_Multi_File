@@ -91,51 +91,31 @@ export async function initializeDApp() {
 
         console.log('✅ DApp initialized successfully');
 
+        // Quick wait for essential data (max 3 seconds), then show UI
+        // Data will continue loading in background
+        let quickWaitCount = 0;
+        const maxQuickWait = 6; // 3 seconds max (6 * 500ms)
 
-        var x=0
-       while(!pricesLoaded && x < 120){
-        x++;
-                if(x > 24){
-                    updateLoadingStatus('Loading price graphs..2. takes up to 30-60 seconds if main server is down');
-
-                }else{
-
-                    updateLoadingStatus('Loading price graphs...');
-                }
-                if(pricesLoaded){
-                    break;
-                }
+        while (!pricesLoaded && !isLatestSearchComplete() && quickWaitCount < maxQuickWait) {
+            quickWaitCount++;
+            updateLoadingStatus('Loading data...');
             await new Promise(resolve => setTimeout(resolve, 500));
         }
 
-
-        var xx=0
-       while(!isLatestSearchComplete() && xx < 180){
-        xx++;
-                if(xx > 24){
-                    updateLoadingStatus('Loading latest blockchain data... takes up to 30-90 seconds if main server is down');
-
-                }else{
-
-                    updateLoadingStatus('Loading blockchain data...');
-                }
-                if(!isLatestSearchComplete()){
-                    break;
-                }
-
-            await new Promise(resolve => setTimeout(resolve, 500));
+        // If we have either prices OR blockchain data, we're good to show UI
+        if (pricesLoaded || isLatestSearchComplete()) {
+            updateLoadingStatus('Ready!');
+        } else {
+            updateLoadingStatus('Loading... (data will appear shortly)');
         }
 
-        if(xx<180 && x<120){
-            updateLoadingStatus('Absolutely Ready!');
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-        }else{
-            updateLoadingStatus('Ready, although took some time to get data!');
-            await new Promise(resolve => setTimeout(resolve, 2500));
-        }
-
+        await new Promise(resolve => setTimeout(resolve, 200));
         hideLoadingScreen();
+
+        // Continue loading remaining data in background (non-blocking)
+        if (!pricesLoaded || !isLatestSearchComplete()) {
+            console.log('Continuing to load data in background...');
+        }
 
         // Start the countdown timer for periodic data refresh
         startCountdown();

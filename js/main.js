@@ -397,6 +397,10 @@ window.saveAddresses = Settings.saveAddresses;
 window.restoreDefaultAddresses = Settings.restoreDefaultAddresses;
 window.restoreDefaultAddressesfromContract = Settings.restoreDefaultAddressesfromContract;
 window.restoreDefaultAddressesfromGithub = Settings.restoreDefaultAddressesfromGithub;
+window.saveBACKUPCustomDataSource_Testnet = Settings.saveBACKUPCustomDataSource_Testnet;
+window.restoreDefaultBACKUPCustomDataSource = Settings.restoreDefaultBACKUPCustomDataSource;
+window.saveMinStaking = Settings.saveMinStaking;
+window.saveMinUserHoldings = Settings.saveMinUserHoldings;
 window.setupUserSelectionTracking = Settings.setupUserSelectionTracking;
 window.CONFIG = Settings.CONFIG;
 
