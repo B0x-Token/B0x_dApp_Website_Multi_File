@@ -206,11 +206,11 @@ export async function depositFromV1toV2() {
         }
 
         if (receipt) {
-            showSuccessNotification('Successfully converted!', 'Converted 0xBTC -> B0x + RightsTo0xBTC', tx.hash);
+            showSuccessNotification('Successfully converted!', 'Converted 0xBTC -> B0x + RightsTo0xBTC', tx.hash, 'ethereum');
             console.log("Transaction confirmed:", receipt.transactionHash);
         } else {
             // Still show success since transaction was sent
-            showSuccessNotification('Transaction sent!', 'Transaction is being processed. Check status with hash: ' + tx.hash, tx.hash);
+            showSuccessNotification('Transaction sent!', 'Transaction is being processed. Check status with hash: ' + tx.hash, tx.hash, 'ethereum');
         }
 
         return true;
@@ -281,11 +281,11 @@ export async function withdrawFromV2toV1() {
         }
 
         if (receipt) {
-            showSuccessNotification('Successfully converted!', 'Converted RightsTo0xBTC + B0x -> 0xBitcoin', tx.hash);
+            showSuccessNotification('Successfully converted!', 'Converted RightsTo0xBTC + B0x -> 0xBitcoin', tx.hash, 'ethereum');
             console.log("Transaction confirmed:", receipt.transactionHash);
         } else {
             // Still show success since transaction was sent
-            showSuccessNotification('Transaction sent!', 'Transaction is being processed. Check status with hash: ' + tx.hash, tx.hash);
+            showSuccessNotification('Transaction sent!', 'Transaction is being processed. Check status with hash: ' + tx.hash, tx.hash, 'ethereum');
         }
 
         return true;

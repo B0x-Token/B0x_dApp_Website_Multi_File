@@ -36,7 +36,7 @@ import {
     checkAllowance,
     approveToken
 } from './contracts.js';
-
+import { switchToBase } from './wallet.js';
 // ============================================
 // STATE VARIABLES
 // ============================================
@@ -1386,7 +1386,11 @@ export async function updateEstimateDisplay(fromToken, toToken, estimate, amount
 export async function getEstimate() {
     if (!window.walletConnected) {
         console.log("Wallet not connected");
+    }else{
+
+     await switchToBase();
     }
+
 
     disableButtonWithSpinner('executeSwapBtn', 'Getting estimate...');
 

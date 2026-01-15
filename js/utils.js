@@ -6,8 +6,9 @@
 // and token operations.
 // ============================================================================
 
-import { tokenAddresses, tokenAddressesETH, tokenMap } from './config.js';
+import { tokenAddresses, tokenAddressesETH, tokenMap, MULTICALL_ADDRESS } from './config.js';
 import {userAddress} from './wallet.js';
+import { customRPC } from './settings.js';
 // ============================================================================
 // TOKEN DECIMALS CONFIGURATION
 // ============================================================================
@@ -330,17 +331,17 @@ export async function fetchTokenBalanceWithEthersETH(
 }
 
 /**
- * Fetch all token balances for Base network
- * @param {string} userAddress - The wallet address to check
- * @param {Object} tokenAddresses - Token addresses mapping
- * @param {Object} tokenAddressesDecimals - Token decimals mapping
- * @param {Function} fetchTokenBalanceWithEthers - Balance fetching function
+ * Fetch all token balances for Base network using Multicall
+ * @param {string} userAddress2 - The wallet address to check (uses window.userAddress if not provided)
+ * @param {Object} tokenAddressesParam - Token addresses mapping (optional, uses imported tokenAddresses)
+ * @param {Object} tokenAddressesDecimals - Token decimals mapping (optional)
+ * @param {Function} fetchTokenBalanceWithEthers - Balance fetching function (unused, kept for compatibility)
  * @param {Function} displayWalletBalances - Function to display balances
  * @returns {Promise<Object>} Object containing all token balances
  */
 export async function fetchBalances(
     userAddress2,
-    tokenAddresses,
+    tokenAddressesParam,
     tokenAddressesDecimals,
     fetchTokenBalanceWithEthers,
     displayWalletBalances,
@@ -349,46 +350,144 @@ export async function fetchBalances(
     walletConnected,
     connectWalletFn
 ) {
-    if (!userAddress) {
-        alert('Please enter a wallet address', 'error');
+    const addressToUse = userAddress2 || userAddress || window.userAddress;
+
+    if (!addressToUse) {
+        console.log('No wallet address available for fetchBalances');
         return;
     }
 
-    if (!isValidEthereumAddress(userAddress)) {
-        alert('Please enter a valid Ethereum address', 'error');
+    if (!isValidEthereumAddress(addressToUse)) {
+        console.log('Invalid Ethereum address for fetchBalances');
         return;
     }
 
-    const walletBalances = {};
-    console.log("Fetching balances...");
+    console.log("Fetching Base token balances with multicall...");
+
+    // Multicall3 ABI with aggregate3 and getEthBalance
+    const MULTICALL3_ABI = [{
+        "inputs": [{
+            "components": [
+                { "internalType": "address", "name": "target", "type": "address" },
+                { "internalType": "bool", "name": "allowFailure", "type": "bool" },
+                { "internalType": "bytes", "name": "callData", "type": "bytes" }
+            ],
+            "internalType": "struct Multicall3.Call3[]",
+            "name": "calls",
+            "type": "tuple[]"
+        }],
+        "name": "aggregate3",
+        "outputs": [{
+            "components": [
+                { "internalType": "bool", "name": "success", "type": "bool" },
+                { "internalType": "bytes", "name": "returnData", "type": "bytes" }
+            ],
+            "internalType": "struct Multicall3.Result[]",
+            "name": "returnData",
+            "type": "tuple[]"
+        }],
+        "stateMutability": "view",
+        "type": "function"
+    }, {
+        "inputs": [{ "internalType": "address", "name": "addr", "type": "address" }],
+        "name": "getEthBalance",
+        "outputs": [{ "internalType": "uint256", "name": "balance", "type": "uint256" }],
+        "stateMutability": "view",
+        "type": "function"
+    }];
+
+    // ERC20 balanceOf ABI
+    const erc20ABI = [{
+        "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+        "name": "balanceOf",
+        "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+        "stateMutability": "view",
+        "type": "function"
+    }];
 
     try {
-        const promises = Object.entries(tokenAddresses).map(async ([symbol, address]) => {
-            // Skip certain tokens
-            if (symbol === 'RightsTo0xBTC' || symbol === 'USDC') {
-                return;
+        const erc20Interface = new ethers.utils.Interface(erc20ABI);
+        const multicallInterface = new ethers.utils.Interface(MULTICALL3_ABI);
+
+        // Use tokenAddresses from config (imported at top)
+        const tokensConfig = tokenAddressesParam || tokenAddresses;
+
+        // Build multicall for: B0x, 0xBTC, WETH, ETH (native)
+        const calls = [
+            // Call 0: B0x balance (18 decimals)
+            {
+                target: tokensConfig['B0x'],
+                allowFailure: true,
+                callData: erc20Interface.encodeFunctionData("balanceOf", [addressToUse])
+            },
+            // Call 1: 0xBTC balance (8 decimals)
+            {
+                target: tokensConfig['0xBTC'],
+                allowFailure: true,
+                callData: erc20Interface.encodeFunctionData("balanceOf", [addressToUse])
+            },
+            // Call 2: WETH balance (18 decimals)
+            {
+                target: tokensConfig['WETH'],
+                allowFailure: true,
+                callData: erc20Interface.encodeFunctionData("balanceOf", [addressToUse])
+            },
+            // Call 3: Native ETH balance (18 decimals)
+            {
+                target: MULTICALL_ADDRESS,
+                allowFailure: true,
+                callData: multicallInterface.encodeFunctionData("getEthBalance", [addressToUse])
             }
+        ];
 
-            const balance = await fetchTokenBalanceWithEthers(
-                address,
-                tokenAddressesDecimals[symbol],
-                provider,
-                signer,
-                walletConnected,
-                connectWalletFn
-            );
-            walletBalances[symbol] = balance;
-        });
+        // Use custom RPC for the multicall
+        const rpcUrl = customRPC || 'https://mainnet.base.org';
+        const multicallProvider = new ethers.providers.JsonRpcProvider(rpcUrl);
+        const multicallContract = new ethers.Contract(MULTICALL_ADDRESS, MULTICALL3_ABI, multicallProvider);
 
-        await Promise.all(promises);
+        console.log("Executing fetchBalances multicall with", calls.length, "calls...");
+        const results = await multicallContract.aggregate3(calls);
+        console.log("fetchBalances multicall executed successfully!");
 
-        // Store on window for display function to access
-        window.walletBalances = walletBalances;
+        // Initialize walletBalances if needed
+        if (!window.walletBalances) window.walletBalances = {};
 
-        displayWalletBalances();
-        return walletBalances;
+        // Decode B0x balance (index 0) - 18 decimals
+        if (results[0].success) {
+            const b0xBalance = erc20Interface.decodeFunctionResult("balanceOf", results[0].returnData)[0];
+            window.walletBalances['B0x'] = ethers.utils.formatUnits(b0xBalance, 18);
+        }
+
+        // Decode 0xBTC balance (index 1) - 8 decimals
+        if (results[1].success) {
+            const zeroxbtcBalance = erc20Interface.decodeFunctionResult("balanceOf", results[1].returnData)[0];
+            window.walletBalances['0xBTC'] = ethers.utils.formatUnits(zeroxbtcBalance, 8);
+        }
+
+        // Decode WETH balance (index 2) - 18 decimals
+        if (results[2].success) {
+            const wethBalance = erc20Interface.decodeFunctionResult("balanceOf", results[2].returnData)[0];
+            window.walletBalances['WETH'] = ethers.utils.formatUnits(wethBalance, 18);
+        }
+
+        // Decode native ETH balance (index 3) - 18 decimals
+        if (results[3].success) {
+            const ethBalance = multicallInterface.decodeFunctionResult("getEthBalance", results[3].returnData)[0];
+            window.walletBalances['ETH'] = ethers.utils.formatUnits(ethBalance, 18);
+        }
+
+        console.log("Token balances loaded from fetchBalances multicall:", window.walletBalances);
+
+        // Update the wallet balances display if function is available
+        if (typeof displayWalletBalances === 'function') {
+            displayWalletBalances(window.walletBalances);
+        } else if (typeof window.displayWalletBalances === 'function') {
+            window.displayWalletBalances(window.walletBalances);
+        }
+
+        return window.walletBalances;
     } catch (error) {
-        console.log("Error fetching balances: ", error);
+        console.error("Error in fetchBalances multicall:", error);
         throw error;
     }
 }

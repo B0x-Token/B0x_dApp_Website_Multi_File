@@ -1428,7 +1428,7 @@ let epchCount;
 
     const formattedNumberfffff23 = new Intl.NumberFormat(navigator.language).format(totalZKTC_Calculated.toFixed(0));
 
-    document.querySelector('.SuccessfulMintTransactions').innerHTML = "<b> " + (total_tx_count).toLocaleString() + " </b> txs";
+    document.querySelector('.SuccessfulMintTransactions').innerHTML = (total_tx_count).toLocaleString() + ' <span class="unit">txs</span>';
 
     innerhtml_buffer += '<tr class="miner-row"><td style="border-bottom: 0rem;">TOTAL:</td><td class="stat-value" style="border-bottom: 0rem;">'
         + total_block_count + '</td><td class="stat-value" style="border-bottom: 0rem;">100%</td><td class="stat-value" style="border-bottom: 0rem;">'

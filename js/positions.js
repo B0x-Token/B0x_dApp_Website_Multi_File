@@ -32,6 +32,11 @@ export let positionData = {};
 export let stakingPositionData = {};
 export let userSelectedPosition = null;
 
+// Cache tracking for position fetches
+let lastPositionFetchTime = 0;
+let lastPositionFetchAddress = null;
+const POSITION_CACHE_DURATION = 30000; // 30 seconds minimum between fetches
+
 // Store total staked amounts globally for display updates
 export let totalStakedAmounts = {
     token0: '0',
@@ -341,23 +346,38 @@ export function updateStakingValuesFromStored() {
 
 /**
  * Gets all token IDs owned by connected wallet
+ * Uses caching to prevent redundant fetches within 30 seconds
  * @async
+ * @param {boolean} forceRefresh - Force refresh even if cache is valid
  * @returns {Promise<Array>} Array of token IDs
  */
-export async function getTokenIDsOwnedByMetamask() {
+export async function getTokenIDsOwnedByMetamask(forceRefresh = false) {
+    const now = Date.now();
+    const sameAddress = lastPositionFetchAddress === window.userAddress;
+    const cacheValid = (now - lastPositionFetchTime) < POSITION_CACHE_DURATION;
+
+    // Skip if cache is valid and same address (unless forced)
+    if (!forceRefresh && sameAddress && cacheValid && Object.keys(positionData).length >= 0) {
+        console.log("Using cached position data (last fetch:", Math.round((now - lastPositionFetchTime) / 1000), "seconds ago)");
+        return;
+    }
+
+    console.log("Fetching fresh position data...");
+    lastPositionFetchTime = now;
+    lastPositionFetchAddress = window.userAddress;
+
     await getTokenIDsOwnedByUser(window.userAddress);
 }
 
 /**
  * Gets all token IDs owned by a specific user address
+ * Uses multicall to batch RPC requests for efficiency
  * @async
  * @param {string} ADDRESSTOSEARCHOF - User address to search for
  * @returns {Promise<void>}
  */
 async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
     await sleep(2000);
-    triggerRefresh();
-    await sleep(100);
     console.log("Calling findUserTokenIds for:", ADDRESSTOSEARCHOF);
 
     // Clear position data at the start
@@ -369,40 +389,33 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
         await window.connectWallet();
     }
 
+    // Multicall3 ABI for batching calls
+    const MULTICALL3_ABI = [{
+        "inputs": [{
+            "components": [
+                { "internalType": "address", "name": "target", "type": "address" },
+                { "internalType": "bool", "name": "allowFailure", "type": "bool" },
+                { "internalType": "bytes", "name": "callData", "type": "bytes" }
+            ],
+            "internalType": "struct Multicall3.Call3[]",
+            "name": "calls",
+            "type": "tuple[]"
+        }],
+        "name": "aggregate3",
+        "outputs": [{
+            "components": [
+                { "internalType": "bool", "name": "success", "type": "bool" },
+                { "internalType": "bytes", "name": "returnData", "type": "bytes" }
+            ],
+            "internalType": "struct Multicall3.Result[]",
+            "name": "returnData",
+            "type": "tuple[]"
+        }],
+        "stateMutability": "view",
+        "type": "function"
+    }];
+
     const positionFinderABI = [
-        {
-            "inputs": [
-                { "internalType": "address", "name": "user", "type": "address" },
-                { "internalType": "uint256", "name": "startId", "type": "uint256" },
-                { "internalType": "uint256", "name": "endId", "type": "uint256" },
-                { "internalType": "address", "name": "Token0", "type": "address" },
-                { "internalType": "address", "name": "Token1", "type": "address" },
-                { "internalType": "address", "name": "HookAddress", "type": "address" },
-                { "internalType": "uint256", "name": "minTokenA", "type": "uint256" }
-            ],
-            "name": "findUserTokenIdswithMinimum",
-            "outputs": [
-                { "internalType": "uint256[]", "name": "ownedTokens", "type": "uint256[]" },
-                { "internalType": "uint256[]", "name": "amountTokenA", "type": "uint256[]" },
-                { "internalType": "uint256[]", "name": "amountTokenB", "type": "uint256[]" },
-                { "internalType": "uint128[]", "name": "positionLiquidity", "type": "uint128[]" },
-                { "internalType": "int128[]", "name": "feesOwedTokenA", "type": "int128[]" },
-                { "internalType": "int128[]", "name": "feesOwedTokenB", "type": "int128[]" },
-                {
-                    "internalType": "struct PoolKey[]", "name": "poolKeyz", "type": "tuple[]",
-                    "components": [
-                        { "internalType": "address", "name": "currency0", "type": "address" },
-                        { "internalType": "address", "name": "currency1", "type": "address" },
-                        { "internalType": "uint24", "name": "fee", "type": "uint24" },
-                        { "internalType": "int24", "name": "tickSpacing", "type": "int24" },
-                        { "internalType": "address", "name": "hooks", "type": "address" }
-                    ]
-                },
-                { "internalType": "uint256[]", "name": "poolInfo", "type": "uint256[]" }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
         {
             "inputs": [
                 { "internalType": "address", "name": "user", "type": "address" },
@@ -426,13 +439,6 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
                 { "internalType": "uint256[]", "name": "poolInfo", "type": "uint256[]" },
                 { "internalType": "int128", "name": "startCountAt", "type": "int128" }
             ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getMaxUniswapIDPossible",
-            "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
             "stateMutability": "view",
             "type": "function"
         },
@@ -478,46 +484,15 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
         }
     ];
 
-    const tokenPositionFinderPro = new ethers.Contract(
-        contractAddress_PositionFinderPro,
-        positionFinderABI,
-        window.signer
-    );
-
-    console.log("Calling getIDSofStakedTokensForUser");
-    const currentTimeInSeconds = Math.floor(Date.now() / 1000);
+    const MULTICALL_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11";
+    const multicallContract = new ethers.Contract(MULTICALL_ADDRESS, MULTICALL3_ABI, window.signer);
+    const positionFinderInterface = new ethers.utils.Interface(positionFinderABI);
 
     const minStaking = document.getElementById('minStaking')?.value || 0;
     const minUserHoldings = document.getElementById('minUserHoldings')?.value || 0;
-
     console.log("Settings: minStaking:", minStaking, "minUserHoldings:", minUserHoldings);
 
-    // Fetch staked positions
-    let MAXTOKENPOSSIBLE_STAKING = 0;
-    let maxTokenPossible_STAKING = 0;
-
-    try {
-        const result = await tokenPositionFinderPro.getMaxStakedIDforUser(window.userAddress);
-        MAXTOKENPOSSIBLE_STAKING = result;
-
-        if (typeof MAXTOKENPOSSIBLE_STAKING === 'bigint') {
-            maxTokenPossible_STAKING = Number(MAXTOKENPOSSIBLE_STAKING);
-        } else if (MAXTOKENPOSSIBLE_STAKING._isBigNumber || MAXTOKENPOSSIBLE_STAKING instanceof ethers.BigNumber) {
-            maxTokenPossible_STAKING = MAXTOKENPOSSIBLE_STAKING.toNumber();
-        } else {
-            maxTokenPossible_STAKING = Number(MAXTOKENPOSSIBLE_STAKING.toString());
-        }
-
-        console.log(`Max staked token ID: ${maxTokenPossible_STAKING}`);
-    } catch (error) {
-        console.error(`Error getting max staked ID:`, error);
-    }
-
-    const maxLoopLookups = 1000;
-    const startSearchAt = WhereToStartSearchStaked;
-    const totalRange = maxTokenPossible_STAKING + 1 - startSearchAt;
-    const NumberOfLoops = Math.ceil(totalRange / maxLoopLookups);
-
+    // Initialize arrays for staked positions
     let ownedTokenIdsOFSwapperOnStaked = [];
     let OWNEDtOKEN1 = [];
     let OWNEDtOKEN2 = [];
@@ -531,53 +506,188 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
     let totalStakedToken1 = toBigNumber(0);
     let lastSpotTosetStartSearchAt = -1;
 
-    for (let x = 0; x < NumberOfLoops; x++) {
-        const startId = startSearchAt + (maxLoopLookups * x);
-        const endId = Math.min(startId + maxLoopLookups - 1, maxTokenPossible_STAKING);
+    // Wait for nftOwners to be loaded first (needed for unstaked positions)
+    while (isSearchingLogs()) {
+        await sleep(1000);
+        console.log("Waiting for log search to complete...");
+    }
+    nftOwners = await getNFTOwners();
 
-        console.log("Looking at staked NFT IDs:", startId, "to", endId);
+    // Get user token IDs from nftOwners mapping for unstaked positions
+    const userTokenIds = [];
+    console.log(`Searching for NFTs owned by: ${window.userAddress}`);
+    for (const [tokenId, owner] of Object.entries(nftOwners)) {
+        if (owner.toLowerCase() === window.userAddress.toLowerCase()) {
+            userTokenIds.push(parseInt(tokenId));
+        }
+    }
+    console.log(`Found ${userTokenIds.length} unstaked NFTs for user`);
 
-        let result;
-        let worked = 1;
-        try {
-            result = await tokenPositionFinderPro.getIDSofStakedTokensForUserwithMinimum(
-                ADDRESSTOSEARCHOF,
-                tokenAddress,
-                Address_ZEROXBTC_TESTNETCONTRACT,
-                minStaking,
-                startId,
-                maxLoopLookups,
-                HookAddress
-            );
-            worked = 0;
-        } catch (e) {
-            console.log("Error fetching staked positions:", e);
+    // Limit unstaked positions to first 25 for initial multicall
+    const unstakedBatch = userTokenIds.slice(0, 25);
+
+    // ============================================
+    // FIRST MULTICALL: getMaxStakedIDforUser + 25 staked positions + 25 unstaked positions
+    // ============================================
+    console.log("=== MULTICALL #1: Fetching max staked ID + initial positions ===");
+
+    const calls = [];
+
+    // Call 1: getMaxStakedIDforUser
+    calls.push({
+        target: contractAddress_PositionFinderPro,
+        allowFailure: true,
+        callData: positionFinderInterface.encodeFunctionData('getMaxStakedIDforUser', [window.userAddress])
+    });
+
+    // Call 2: getIDSofStakedTokensForUserwithMinimum (first 25 staked positions)
+    calls.push({
+        target: contractAddress_PositionFinderPro,
+        allowFailure: true,
+        callData: positionFinderInterface.encodeFunctionData('getIDSofStakedTokensForUserwithMinimum', [
+            ADDRESSTOSEARCHOF,
+            tokenAddress,
+            Address_ZEROXBTC_TESTNETCONTRACT,
+            minStaking,
+            0,  // startIndex
+            25, // count - assume 25 max initially
+            HookAddress
+        ])
+    });
+
+    // Call 3: findUserTokenIdswithMinimumIndividual (first 25 unstaked positions)
+    if (unstakedBatch.length > 0) {
+        calls.push({
+            target: contractAddress_PositionFinderPro,
+            allowFailure: true,
+            callData: positionFinderInterface.encodeFunctionData('findUserTokenIdswithMinimumIndividual', [
+                window.userAddress,
+                unstakedBatch,
+                CONFIG.TARGET_POOL_KEY.currency0,
+                CONFIG.TARGET_POOL_KEY.currency1,
+                CONFIG.TARGET_POOL_KEY.hooks,
+                0
+            ])
+        });
+    }
+
+    let maxTokenPossible_STAKING = 0;
+    let stakedResult = null;
+    let unstakedResult = null;
+
+    try {
+        console.log(`Executing multicall with ${calls.length} calls...`);
+        const results = await multicallContract.aggregate3(calls);
+
+        // Decode getMaxStakedIDforUser result
+        if (results[0].success && results[0].returnData !== '0x') {
+            const decoded = positionFinderInterface.decodeFunctionResult('getMaxStakedIDforUser', results[0].returnData);
+            const MAXTOKENPOSSIBLE_STAKING = decoded[0];
+            if (typeof MAXTOKENPOSSIBLE_STAKING === 'bigint') {
+                maxTokenPossible_STAKING = Number(MAXTOKENPOSSIBLE_STAKING);
+            } else if (MAXTOKENPOSSIBLE_STAKING._isBigNumber || MAXTOKENPOSSIBLE_STAKING instanceof ethers.BigNumber) {
+                maxTokenPossible_STAKING = MAXTOKENPOSSIBLE_STAKING.toNumber();
+            } else {
+                maxTokenPossible_STAKING = Number(MAXTOKENPOSSIBLE_STAKING.toString());
+            }
+            console.log(`Max staked token ID: ${maxTokenPossible_STAKING}`);
         }
 
-        if (worked == 1) {
-            await loadPositionsIntoDappSelections();
-            hideLoadingWidget();
-            return;
+        // Decode getIDSofStakedTokensForUserwithMinimum result
+        if (results[1].success && results[1].returnData !== '0x') {
+            stakedResult = positionFinderInterface.decodeFunctionResult('getIDSofStakedTokensForUserwithMinimum', results[1].returnData);
+            console.log(`First staked batch: ${stakedResult[0].length} positions found`);
         }
 
-        ownedTokenIdsOFSwapperOnStaked = ownedTokenIdsOFSwapperOnStaked.concat(result[0]);
-        totalStakedToken0 = totalStakedToken0.add(sumBigNumberArray(result[1]));
-        totalStakedToken1 = totalStakedToken1.add(sumBigNumberArray(result[2]));
-        OWNEDtOKEN1 = OWNEDtOKEN1.concat(result[1]);
-        OWNEDtOKEN2 = OWNEDtOKEN2.concat(result[2]);
-        liquidity = liquidity.concat(result[3]);
-        timeStakedAT1 = timeStakedAT1.concat(result[4]);
-        PenaltyForWithdraw = PenaltyForWithdraw.concat(result[5]);
-        PoolKeyCurrency0 = PoolKeyCurrency0.concat(result[6]);
-        PoolKeyCurrency1 = PoolKeyCurrency1.concat(result[7]);
-        poolInfoi = poolInfoi.concat(result[8]);
+        // Decode findUserTokenIdswithMinimumIndividual result
+        if (calls.length > 2 && results[2].success && results[2].returnData !== '0x') {
+            unstakedResult = positionFinderInterface.decodeFunctionResult('findUserTokenIdswithMinimumIndividual', results[2].returnData);
+            console.log(`First unstaked batch: ${unstakedResult[0].length} positions found`);
+        }
 
+    } catch (error) {
+        console.log("Error in first multicall:", error);
+    }
+
+    // Process first staked batch
+    if (stakedResult) {
+        ownedTokenIdsOFSwapperOnStaked = ownedTokenIdsOFSwapperOnStaked.concat(stakedResult[0]);
+        totalStakedToken0 = totalStakedToken0.add(sumBigNumberArray(stakedResult[1]));
+        totalStakedToken1 = totalStakedToken1.add(sumBigNumberArray(stakedResult[2]));
+        OWNEDtOKEN1 = OWNEDtOKEN1.concat(stakedResult[1]);
+        OWNEDtOKEN2 = OWNEDtOKEN2.concat(stakedResult[2]);
+        liquidity = liquidity.concat(stakedResult[3]);
+        timeStakedAT1 = timeStakedAT1.concat(stakedResult[4]);
+        PenaltyForWithdraw = PenaltyForWithdraw.concat(stakedResult[5]);
+        PoolKeyCurrency0 = PoolKeyCurrency0.concat(stakedResult[6]);
+        PoolKeyCurrency1 = PoolKeyCurrency1.concat(stakedResult[7]);
+        poolInfoi = poolInfoi.concat(stakedResult[8]);
         if (lastSpotTosetStartSearchAt == -1) {
-            lastSpotTosetStartSearchAt = result[9];
+            lastSpotTosetStartSearchAt = stakedResult[9];
         }
     }
 
-    console.log("Number of staked positions:", ownedTokenIdsOFSwapperOnStaked.length);
+    // ============================================
+    // ADDITIONAL MULTICALLS: If more than 25 staked positions exist
+    // ============================================
+    if (maxTokenPossible_STAKING > 25) {
+        console.log(`Max staked ID (${maxTokenPossible_STAKING}) > 25, fetching additional staked positions...`);
+
+        // Calculate how many more batches we need (25 positions per batch)
+        const remainingPositions = maxTokenPossible_STAKING - 25;
+        const additionalBatches = Math.ceil(remainingPositions / 25);
+
+        for (let batchNum = 1; batchNum <= additionalBatches; batchNum++) {
+            // 1 second delay between multicalls
+            await sleep(1000);
+
+            const startIndex = batchNum * 25;
+            console.log(`=== MULTICALL #${batchNum + 1}: Fetching staked positions ${startIndex} to ${startIndex + 25} ===`);
+
+            const additionalCalls = [{
+                target: contractAddress_PositionFinderPro,
+                allowFailure: true,
+                callData: positionFinderInterface.encodeFunctionData('getIDSofStakedTokensForUserwithMinimum', [
+                    ADDRESSTOSEARCHOF,
+                    tokenAddress,
+                    Address_ZEROXBTC_TESTNETCONTRACT,
+                    minStaking,
+                    startIndex,
+                    25,
+                    HookAddress
+                ])
+            }];
+
+            try {
+                const additionalResults = await multicallContract.aggregate3(additionalCalls);
+
+                if (additionalResults[0].success && additionalResults[0].returnData !== '0x') {
+                    const additionalStakedResult = positionFinderInterface.decodeFunctionResult(
+                        'getIDSofStakedTokensForUserwithMinimum',
+                        additionalResults[0].returnData
+                    );
+
+                    console.log(`Additional staked batch ${batchNum}: ${additionalStakedResult[0].length} positions found`);
+
+                    ownedTokenIdsOFSwapperOnStaked = ownedTokenIdsOFSwapperOnStaked.concat(additionalStakedResult[0]);
+                    totalStakedToken0 = totalStakedToken0.add(sumBigNumberArray(additionalStakedResult[1]));
+                    totalStakedToken1 = totalStakedToken1.add(sumBigNumberArray(additionalStakedResult[2]));
+                    OWNEDtOKEN1 = OWNEDtOKEN1.concat(additionalStakedResult[1]);
+                    OWNEDtOKEN2 = OWNEDtOKEN2.concat(additionalStakedResult[2]);
+                    liquidity = liquidity.concat(additionalStakedResult[3]);
+                    timeStakedAT1 = timeStakedAT1.concat(additionalStakedResult[4]);
+                    PenaltyForWithdraw = PenaltyForWithdraw.concat(additionalStakedResult[5]);
+                    PoolKeyCurrency0 = PoolKeyCurrency0.concat(additionalStakedResult[6]);
+                    PoolKeyCurrency1 = PoolKeyCurrency1.concat(additionalStakedResult[7]);
+                    poolInfoi = poolInfoi.concat(additionalStakedResult[8]);
+                }
+            } catch (error) {
+                console.log(`Error in additional staked multicall batch ${batchNum}:`, error);
+            }
+        }
+    }
+
+    console.log("Total staked positions found:", ownedTokenIdsOFSwapperOnStaked.length);
 
     if (lastSpotTosetStartSearchAt != -1) {
         WhereToStartSearchStaked = lastSpotTosetStartSearchAt - 1;
@@ -633,173 +743,137 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
 
     await loadPositionsIntoDappSelections();
 
-    // Fetch user-owned (non-staked) positions
-    try {
-        const positionFinderABI2 = [
-            {
-                "inputs": [
-                    { "name": "user", "type": "address" },
-                    { "name": "tokenIds", "type": "uint256[]" },
-                    { "name": "Token0", "type": "address" },
-                    { "name": "Token1", "type": "address" },
-                    { "name": "HookAddress", "type": "address" },
-                    { "name": "minTokenA", "type": "uint256" }
-                ],
-                "name": "findUserTokenIdswithMinimumIndividual",
-                "outputs": [
-                    { "name": "ownedTokens", "type": "uint256[]" },
-                    { "name": "amountTokenA", "type": "uint256[]" },
-                    { "name": "amountTokenB", "type": "uint256[]" },
-                    { "name": "positionLiquidity", "type": "uint128[]" },
-                    { "name": "feesOwedTokenA", "type": "int128[]" },
-                    { "name": "feesOwedTokenB", "type": "int128[]" },
-                    {
-                        "name": "poolKeyz",
-                        "type": "tuple[]",
-                        "components": [
-                            { "name": "currency0", "type": "address" },
-                            { "name": "currency1", "type": "address" },
-                            { "name": "fee", "type": "uint24" },
-                            { "name": "tickSpacing", "type": "int24" },
-                            { "name": "hooks", "type": "address" }
-                        ]
-                    },
-                    { "name": "poolInfo", "type": "uint256[]" }
-                ],
-                "stateMutability": "view",
-                "type": "function"
-            }
-        ];
+    // ============================================
+    // PROCESS UNSTAKED POSITIONS
+    // ============================================
+    let ownedTokenIds = [];
+    let unstakedOWNEDtOKEN1 = [];
+    let unstakedOWNEDtOKEN2 = [];
+    let unstakedLiquidity = [];
+    let feesOwedToken1 = [];
+    let feesOwedToken2 = [];
+    let poolKeyi = [];
+    let unstakedPoolInfoi = [];
 
-        const tokenPositionFinderPro2 = new ethers.Contract(
-            contractAddress_PositionFinderPro,
-            positionFinderABI2,
-            window.signer
-        );
+    // Process first unstaked batch from initial multicall
+    if (unstakedResult) {
+        ownedTokenIds = ownedTokenIds.concat(unstakedResult[0]);
+        unstakedOWNEDtOKEN1 = unstakedOWNEDtOKEN1.concat(unstakedResult[1]);
+        unstakedOWNEDtOKEN2 = unstakedOWNEDtOKEN2.concat(unstakedResult[2]);
+        unstakedLiquidity = unstakedLiquidity.concat(unstakedResult[3]);
+        feesOwedToken1 = feesOwedToken1.concat(unstakedResult[4]);
+        feesOwedToken2 = feesOwedToken2.concat(unstakedResult[5]);
+        poolKeyi = poolKeyi.concat(unstakedResult[6]);
+        unstakedPoolInfoi = unstakedPoolInfoi.concat(unstakedResult[7]);
+    }
 
-        while (isSearchingLogs()) {
+    // Fetch remaining unstaked positions if more than 25
+    if (userTokenIds.length > 25) {
+        console.log(`More than 25 unstaked positions (${userTokenIds.length}), fetching additional batches...`);
+
+        const batchSize = 25;
+        for (let i = 25; i < userTokenIds.length; i += batchSize) {
+            // 1 second delay between multicalls
             await sleep(1000);
-            console.log("Waiting for log search to complete...");
-        }
-        nftOwners = await getNFTOwners();
-        // Get user token IDs from nftOwners mapping
-        const userTokenIds = [];
-        console.log(`Searching for NFTs owned by: ${window.userAddress}`);
 
-        for (const [tokenId, owner] of Object.entries(nftOwners)) {
-            if (owner.toLowerCase() === window.userAddress.toLowerCase()) {
-                userTokenIds.push(parseInt(tokenId));
-            }
-        }
-
-        if (userTokenIds.length === 0) {
-            console.log(`No NFTs found for user ${window.userAddress}`);
-            await loadPositionsIntoDappSelections();
-            hideLoadingWidget();
-            return null;
-        }
-
-        console.log(`Found ${userTokenIds.length} NFTs for user`);
-
-        // Process in batches
-        let ownedTokenIds = [];
-        OWNEDtOKEN1 = [];
-        OWNEDtOKEN2 = [];
-        liquidity = [];
-        let feesOwedToken1 = [];
-        let feesOwedToken2 = [];
-        let poolKeyi = [];
-        poolInfoi = [];
-
-        const batchSize = 500;
-        for (let i = 0; i < userTokenIds.length; i += batchSize) {
             const batch = userTokenIds.slice(i, i + batchSize);
-            console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(userTokenIds.length / batchSize)}`);
+            console.log(`=== MULTICALL: Fetching unstaked positions ${i} to ${i + batch.length} ===`);
 
-            try {
-                const result = await tokenPositionFinderPro2.findUserTokenIdswithMinimumIndividual(
+            const unstakedCalls = [{
+                target: contractAddress_PositionFinderPro,
+                allowFailure: true,
+                callData: positionFinderInterface.encodeFunctionData('findUserTokenIdswithMinimumIndividual', [
                     window.userAddress,
                     batch,
                     CONFIG.TARGET_POOL_KEY.currency0,
                     CONFIG.TARGET_POOL_KEY.currency1,
                     CONFIG.TARGET_POOL_KEY.hooks,
                     0
-                );
-
-                if (result) {
-                    ownedTokenIds = result[0].concat(ownedTokenIds);
-                    OWNEDtOKEN1 = result[1].concat(OWNEDtOKEN1);
-                    OWNEDtOKEN2 = result[2].concat(OWNEDtOKEN2);
-                    liquidity = result[3].concat(liquidity);
-                    feesOwedToken1 = result[4].concat(feesOwedToken1);
-                    feesOwedToken2 = result[5].concat(feesOwedToken2);
-                    poolKeyi = result[6].concat(poolKeyi);
-                    poolInfoi = result[7].concat(poolInfoi);
-                }
-            } catch (e) {
-                console.log("Batch search error:", e);
-            }
-        }
-
-        console.log("Number of positions found:", ownedTokenIds.length);
-
-        // Process each position
-        for (let i = 0; i < ownedTokenIds.length; i++) {
-            const tokenId = ownedTokenIds[i];
-            if (tokenId > WhereToStartSearch) {
-                WhereToStartSearch = parseInt(tokenId.toString());
-            }
+                ])
+            }];
 
             try {
-                const poolKey = poolKeyi[i];
-                const info2 = poolInfoi[i];
+                const unstakedResults = await multicallContract.aggregate3(unstakedCalls);
 
-                const decodedInfo = {
-                    tickLower: TOtickLower(info2.toString()),
-                    tickUpper: TOtickUpper(info2.toString())
-                };
+                if (unstakedResults[0].success && unstakedResults[0].returnData !== '0x') {
+                    const additionalUnstakedResult = positionFinderInterface.decodeFunctionResult(
+                        'findUserTokenIdswithMinimumIndividual',
+                        unstakedResults[0].returnData
+                    );
 
-                let feeVariable = (parseInt(poolKey.fee.toString()) / 10000).toFixed(2) + "%";
-                if ("8388608" == poolKey.fee.toString()) {
-                    feeVariable = "Dynamic Fee";
+                    console.log(`Additional unstaked batch: ${additionalUnstakedResult[0].length} positions found`);
+
+                    ownedTokenIds = ownedTokenIds.concat(additionalUnstakedResult[0]);
+                    unstakedOWNEDtOKEN1 = unstakedOWNEDtOKEN1.concat(additionalUnstakedResult[1]);
+                    unstakedOWNEDtOKEN2 = unstakedOWNEDtOKEN2.concat(additionalUnstakedResult[2]);
+                    unstakedLiquidity = unstakedLiquidity.concat(additionalUnstakedResult[3]);
+                    feesOwedToken1 = feesOwedToken1.concat(additionalUnstakedResult[4]);
+                    feesOwedToken2 = feesOwedToken2.concat(additionalUnstakedResult[5]);
+                    poolKeyi = poolKeyi.concat(additionalUnstakedResult[6]);
+                    unstakedPoolInfoi = unstakedPoolInfoi.concat(additionalUnstakedResult[7]);
                 }
-
-                const tokenASymbol = getSymbolFromAddress(poolKey.currency0);
-                const tokenBSymbol = getSymbolFromAddress(poolKey.currency1);
-                const poolNamepool = `${tokenASymbol}/${tokenBSymbol}`;
-                const idNameID = `position_${tokenId.toString()}`;
-
-                const decimalsTokenA = tokenAddressesDecimals[tokenASymbol];
-                const decimalsTokenB = tokenAddressesDecimals[tokenBSymbol];
-
-                const formattedToken1 = ethers.utils.formatUnits(OWNEDtOKEN1[i], decimalsTokenA);
-                const formattedToken2 = ethers.utils.formatUnits(OWNEDtOKEN2[i], decimalsTokenB);
-                const formattedToken1FEESOWED = ethers.utils.formatUnits(feesOwedToken1[i], decimalsTokenA);
-                const formattedToken2FEESOWED = ethers.utils.formatUnits(feesOwedToken2[i], decimalsTokenB);
-
-                // Only include full-range positions
-                if (decodedInfo.tickUpper == 887220 && decodedInfo.tickLower == -887220) {
-                    positionData[idNameID] = {
-                        id: idNameID,
-                        pool: poolNamepool,
-                        feeTier: feeVariable,
-                        tokenA: tokenASymbol,
-                        tokenB: tokenBSymbol,
-                        currentLiquidity: parseFloat(liquidity[i].toString()),
-                        currentTokenA: formattedToken1,
-                        currentTokenB: formattedToken2,
-                        unclaimedFeesTokenA: formattedToken1FEESOWED,
-                        unclaimedFeesTokenB: formattedToken2FEESOWED,
-                        tokenAIcon: tokenASymbol ? tokenASymbol[0] : "?",
-                        tokenBIcon: tokenBSymbol ? tokenBSymbol[0] : "?"
-                    };
-                }
-            } catch (positionError) {
-                console.error(`Error processing position ${tokenId}:`, positionError);
+            } catch (error) {
+                console.log(`Error in additional unstaked multicall:`, error);
             }
         }
-    } catch (e) {
-        console.log("Error fetching user positions:", e);
+    }
+
+    console.log("Total unstaked positions found:", ownedTokenIds.length);
+
+    // Process each unstaked position
+    for (let i = 0; i < ownedTokenIds.length; i++) {
+        const tokenId = ownedTokenIds[i];
+        if (tokenId > WhereToStartSearch) {
+            WhereToStartSearch = parseInt(tokenId.toString());
+        }
+
+        try {
+            const poolKey = poolKeyi[i];
+            const info2 = unstakedPoolInfoi[i];
+
+            const decodedInfo = {
+                tickLower: TOtickLower(info2.toString()),
+                tickUpper: TOtickUpper(info2.toString())
+            };
+
+            let feeVariable = (parseInt(poolKey.fee.toString()) / 10000).toFixed(2) + "%";
+            if ("8388608" == poolKey.fee.toString()) {
+                feeVariable = "Dynamic Fee";
+            }
+
+            const tokenASymbol = getSymbolFromAddress(poolKey.currency0);
+            const tokenBSymbol = getSymbolFromAddress(poolKey.currency1);
+            const poolNamepool = `${tokenASymbol}/${tokenBSymbol}`;
+            const idNameID = `position_${tokenId.toString()}`;
+
+            const decimalsTokenA = tokenAddressesDecimals[tokenASymbol];
+            const decimalsTokenB = tokenAddressesDecimals[tokenBSymbol];
+
+            const formattedToken1 = ethers.utils.formatUnits(unstakedOWNEDtOKEN1[i], decimalsTokenA);
+            const formattedToken2 = ethers.utils.formatUnits(unstakedOWNEDtOKEN2[i], decimalsTokenB);
+            const formattedToken1FEESOWED = ethers.utils.formatUnits(feesOwedToken1[i], decimalsTokenA);
+            const formattedToken2FEESOWED = ethers.utils.formatUnits(feesOwedToken2[i], decimalsTokenB);
+
+            // Only include full-range positions
+            if (decodedInfo.tickUpper == 887220 && decodedInfo.tickLower == -887220) {
+                positionData[idNameID] = {
+                    id: idNameID,
+                    pool: poolNamepool,
+                    feeTier: feeVariable,
+                    tokenA: tokenASymbol,
+                    tokenB: tokenBSymbol,
+                    currentLiquidity: parseFloat(unstakedLiquidity[i].toString()),
+                    currentTokenA: formattedToken1,
+                    currentTokenB: formattedToken2,
+                    unclaimedFeesTokenA: formattedToken1FEESOWED,
+                    unclaimedFeesTokenB: formattedToken2FEESOWED,
+                    tokenAIcon: tokenASymbol ? tokenASymbol[0] : "?",
+                    tokenBIcon: tokenBSymbol ? tokenBSymbol[0] : "?"
+                };
+            }
+        } catch (positionError) {
+            console.error(`Error processing position ${tokenId}:`, positionError);
+        }
     }
 
     await loadPositionsIntoDappSelections();
@@ -1096,7 +1170,7 @@ export async function increaseLiquidity() {
         await new Promise(resolve => setTimeout(resolve, 1000));
         fetchBalances();
         await new Promise(resolve => setTimeout(resolve, 1000));
-        await getTokenIDsOwnedByMetamask();
+        await getTokenIDsOwnedByMetamask(true); // Force refresh after liquidity change
     } catch (error) {
         console.error(`Error increasing liquidity:`, error);
         showErrorNotification('Operation Failed', error.message || 'Failed to increase liquidity');
@@ -1327,7 +1401,7 @@ export async function decreaseLiquidity() {
         await new Promise(resolve => setTimeout(resolve, 1000));
         fetchBalances();
         await new Promise(resolve => setTimeout(resolve, 1000));
-        getTokenIDsOwnedByMetamask();
+        getTokenIDsOwnedByMetamask(true); // Force refresh after liquidity change
     } catch (error) {
         enableButton('decreaseLiquidityBtn', 'Decrease Liquidity and Claim Fees');
         console.error(`Error decreasing liquidity:`, error);

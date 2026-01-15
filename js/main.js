@@ -442,6 +442,7 @@ window.fetchDataFromUrl = DataLoader.fetchDataFromUrl;
 window.mainRPCStarterForPositions = DataLoader.mainRPCStarterForPositions;
 window.getNFTOwners = DataLoader.getNFTOwners;
 window.getValidPositions = DataLoader.getValidPositions;
+window.triggerRefresh = DataLoader.triggerRefresh;
 
 // Staking module
 window.updateStakingStats = Staking.updateStakingStats;

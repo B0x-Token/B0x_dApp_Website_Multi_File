@@ -542,7 +542,7 @@ export async function depositNFTStake() {
         enableButton('depositNFTStakeBtn', 'Deposit NFT');
 
         if (window.fetchBalances) await window.fetchBalances();
-        if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask();
+        if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask(true); // Force refresh after stake
         if (window.loadPositionsIntoDappSelections) await window.loadPositionsIntoDappSelections();
         await getRewardStats();
 
@@ -619,7 +619,7 @@ export async function withdrawNFTStake() {
         showSuccessNotification('Withdrew Uniswap ID: ' + positionStaking.id + ' successfully!', 'Transaction confirmed on blockchain', stakeTx.hash);
 
         if (window.fetchBalances) await window.fetchBalances();
-        if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask();
+        if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask(true); // Force refresh after unstake
         if (window.loadPositionsIntoDappSelections) await window.loadPositionsIntoDappSelections();
 
     } catch (error) {
@@ -832,6 +832,12 @@ export async function getRewardStats() {
         "outputs": [{ "internalType": "uint256", "name": "blockNumber", "type": "uint256" }],
         "stateMutability": "view",
         "type": "function"
+    }, {
+        "inputs": [{ "internalType": "address", "name": "addr", "type": "address" }],
+        "name": "getEthBalance",
+        "outputs": [{ "internalType": "uint256", "name": "balance", "type": "uint256" }],
+        "stateMutability": "view",
+        "type": "function"
     }];
 
     const getRewardStatsABI = [{
@@ -888,10 +894,19 @@ export async function getRewardStats() {
         "type": "function"
     }];
 
+    const erc20ABI = [{
+        "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+        "name": "balanceOf",
+        "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+        "stateMutability": "view",
+        "type": "function"
+    }];
+
     const iface = new ethers.utils.Interface(getRewardStatsABI);
     const contractInterface = new ethers.utils.Interface(CONTRACT_ABI);
     const tokenSwapperInterface = new ethers.utils.Interface(tokenSwapperABI);
     const multicallInterface = new ethers.utils.Interface(MULTICALL3_ABI);
+    const erc20Interface = new ethers.utils.Interface(erc20ABI);
 
     console.log("userAddress== ", window.userAddress);
 
@@ -948,6 +963,33 @@ export async function getRewardStats() {
             target: MULTICALL3_ADDRESS,
             allowFailure: false,
             callData: multicallInterface.encodeFunctionData("getBlockNumber", [])
+        },
+        // Calls 18-21: Token balanceOf calls (4 calls) - saves 4 RPC calls
+        {
+            target: tokenAddresses['B0x'],
+            allowFailure: true,
+            callData: erc20Interface.encodeFunctionData("balanceOf", [window.userAddress])
+        },
+        {
+            target: tokenAddresses['0xBTC'],
+            allowFailure: true,
+            callData: erc20Interface.encodeFunctionData("balanceOf", [window.userAddress])
+        },
+        {
+            target: tokenAddresses['WETH'],
+            allowFailure: true,
+            callData: erc20Interface.encodeFunctionData("balanceOf", [window.userAddress])
+        },
+        {
+            target: tokenAddresses['RightsTo0xBTC'],
+            allowFailure: true,
+            callData: erc20Interface.encodeFunctionData("balanceOf", [window.userAddress])
+        },
+        // Call 22: Native ETH balance (1 call) - saves 1 RPC call
+        {
+            target: MULTICALL3_ADDRESS,
+            allowFailure: true,
+            callData: multicallInterface.encodeFunctionData("getEthBalance", [window.userAddress])
         }
     ];
 
@@ -1019,6 +1061,50 @@ export async function getRewardStats() {
 
     // Update cachedContractStats with the block number from multicall
     window.cachedContractStats.blockNumber = blockNumberFromMulticall.toString();
+
+    // Decode token balances (indices 18-21) and update window.walletBalances
+    try {
+        if (!window.walletBalances) window.walletBalances = {};
+
+        // B0x balance (index 18) - 18 decimals
+        if (results[18].success) {
+            const b0xBalance = erc20Interface.decodeFunctionResult("balanceOf", results[18].returnData)[0];
+            window.walletBalances['B0x'] = ethers.utils.formatUnits(b0xBalance, 18);
+        }
+
+        // 0xBTC balance (index 19) - 8 decimals
+        if (results[19].success) {
+            const zeroxbtcBalance = erc20Interface.decodeFunctionResult("balanceOf", results[19].returnData)[0];
+            window.walletBalances['0xBTC'] = ethers.utils.formatUnits(zeroxbtcBalance, 8);
+        }
+
+        // WETH balance (index 20) - 18 decimals
+        if (results[20].success) {
+            const wethBalance = erc20Interface.decodeFunctionResult("balanceOf", results[20].returnData)[0];
+            window.walletBalances['WETH'] = ethers.utils.formatUnits(wethBalance, 18);
+        }
+
+        // RightsTo0xBTC balance (index 21) - 18 decimals
+        if (results[21].success) {
+            const rightsBalance = erc20Interface.decodeFunctionResult("balanceOf", results[21].returnData)[0];
+            window.walletBalances['RightsTo0xBTC'] = ethers.utils.formatUnits(rightsBalance, 18);
+        }
+
+        // Native ETH balance (index 22) - 18 decimals
+        if (results[22].success) {
+            const ethBalance = multicallInterface.decodeFunctionResult("getEthBalance", results[22].returnData)[0];
+            window.walletBalances['ETH'] = ethers.utils.formatUnits(ethBalance, 18);
+        }
+
+        console.log("Token balances loaded from SUPER COMBINED MULTICALL:", window.walletBalances);
+
+        // Update the wallet balances display if function is available
+        if (typeof window.displayWalletBalances === 'function') {
+            window.displayWalletBalances(window.walletBalances);
+        }
+    } catch (balanceError) {
+        console.warn("Failed to decode token balances from multicall:", balanceError);
+    }
 
     const rewardAddressesStaking = result[0];
     const rewardsOwed = result[1];
@@ -1378,7 +1464,7 @@ export async function decreaseLiquidityStaking() {
         if (window.fetchBalances) await window.fetchBalances();
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask();
+        if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask(true); // Force refresh after decrease
         await getRewardStats();
 
     } catch (error) {
@@ -1548,7 +1634,7 @@ export async function increaseLiquidityStaking() {
     await new Promise(resolve => setTimeout(resolve, 1000));
     await getRewardStats();
     await new Promise(resolve => setTimeout(resolve, 1000));
-    if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask();
+    if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask(true); // Force refresh after increase
 }
 
 // ============================================================================

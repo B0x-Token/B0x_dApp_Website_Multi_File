@@ -217,14 +217,18 @@ export function hideNotification(id) {
  * @param {string} msg - Main message
  * @param {string} msg2 - Secondary message
  * @param {string} txHash - Optional transaction hash for explorer link
+ * @param {string} network - Network for explorer link ('base' or 'ethereum')
  * @returns {string} Notification ID
  */
-export function showSuccessNotification(msg = 'Swap Complete!', msg2 = 'Transaction confirmed on blockchain', txHash = null) {
+export function showSuccessNotification(msg = 'Swap Complete!', msg2 = 'Transaction confirmed on blockchain', txHash = null, network = 'base') {
     let enhancedMessage = msg2;
     let notificationId;
 
     if (txHash) {
-        enhancedMessage = `${msg2} <br><a href="https://basescan.org/tx/${txHash}" target="_blank" style="color: #10b981; text-decoration: underline; font-weight: 600;">View on Explorer →</a>`;
+        const explorerUrl = network === 'ethereum'
+            ? `https://etherscan.io/tx/${txHash}`
+            : `https://basescan.org/tx/${txHash}`;
+        enhancedMessage = `${msg2} <br><a href="${explorerUrl}" target="_blank" style="color: #10b981; text-decoration: underline; font-weight: 600;">View on Explorer →</a>`;
     }
 
     // Show notification for 30 seconds (30000ms)
@@ -439,6 +443,14 @@ export async function switchTab(tabName) {
 
     var name = '#' + tabName;
     getNotificationWidget().positionInContainer(name);
+    if (!window.walletConnected) {
+        console.log("Wallet not connected");
+    }else{
+        if(tabName != 'convert' && tabName != "settings" && tabName != "contract-info" && tabName != "whitepaper" && tabName != "miner");{
+
+            await switchToBase();
+        }
+    }
 
     // Hide all pages
     const pages = document.querySelectorAll('.page');
@@ -563,6 +575,59 @@ export async function switchTab(tabName) {
             await window.getAllFees();
         } else {
             console.warn('Pool fees function not available');
+        }
+    } else if (tabName === 'convert') {
+        // Load ETH balances for convert tab
+        if (window.walletConnected && window.userAddress) {
+            // Check if ETH balances not already loaded
+            if (!window.walletBalancesETH || !window.walletBalancesETH['0xBTC']) {
+                console.log('Loading ETH balances for convert tab...');
+                if (typeof window.switchToEthereum === 'function') {
+                    await window.switchToEthereum();
+                }
+                if (typeof window.fetchBalancesETH === 'function') {
+                    try {
+                        await window.fetchBalancesETH(
+                            window.userAddress,
+                            window.tokenAddressesETH,
+                            window.tokenAddressesDecimalsETH,
+                            window.fetchTokenBalanceWithEthersETH,
+                            window.displayWalletBalancesETH,
+                            window.providerETH,
+                            window.signerETH,
+                            window.walletConnected,
+                            window.connectWallet
+                        );
+                    } catch (e) {
+                        console.warn('Failed to fetch ETH balances:', e);
+                    }
+                }
+            }
+        }
+    } else if (tabName === 'create' || tabName === 'increase-liquidity' || tabName === 'decrease-liquidity') {
+        // Load wallet balances for liquidity tabs (create, increase, decrease)
+        if (window.walletConnected && window.userAddress) {
+            // Check if wallet balances not already loaded
+            if (!window.walletBalances || !window.walletBalances['0xBTC']) {
+                console.log('Loading wallet balances for liquidity tab...');
+                // Use getRewardStats which now includes token balances in the multicall
+                if (typeof window.getRewardStats === 'function') {
+                    try {
+                        await window.getRewardStats();
+                    } catch (e) {
+                        console.warn('Failed to load wallet balances:', e);
+                    }
+                }
+            }
+            // Load positions for increase/decrease liquidity
+            if (tabName === 'increase-liquidity' || tabName === 'decrease-liquidity') {
+                if (typeof window.getTokenIDsOwnedByMetamask === 'function') {
+                    await window.getTokenIDsOwnedByMetamask();
+                }
+                if (typeof window.loadPositionsIntoDappSelections === 'function') {
+                    await window.loadPositionsIntoDappSelections();
+                }
+            }
         }
     } else {
         // Remove active class from all sub-tabs and sub-pages
@@ -821,6 +886,11 @@ export function displayWalletBalances() {
     for (const [token, balance] of Object.entries(walletBalances)) {
         if (!TOKEN_ORDER.includes(token)) {
             const iconUrl = tokenIconsBase[token] || '';
+            console.log("TOKEN WWE NEED TO REMOVE = ",token);
+            if(token == "RightsTo0xBTC"){
+            console.log("TOKEN WWE NEED TO REMOVE = since were not using RightsTo0xBTCon base yet",token);
+                continue;
+            }
             balancesHTML += `
                 <div class="balance-item">
                     ${iconUrl ? `<img src="${iconUrl}" alt="${token}" class="token-icon222" onerror="this.style.display='none'">` : ''}
@@ -3620,12 +3690,12 @@ export function updateMiningStatsDisplay(stats) {
         const holdersEl = document.querySelector('.stat-value-tokenHolders');
         console.log("HOLDERS: ",stats.tokenHolders);
         if (holdersEl && stats.tokenHolders) {
-            holdersEl.textContent = stats.tokenHolders.toLocaleString() + " holders";
+            holdersEl.innerHTML = `${stats.tokenHolders.toLocaleString()} <span class="unit">holders</span>`;
         }
-        // Update token holders (if element exists)
+        // Update token transfers (if element exists)
         const txsEl = document.querySelector('.stat-value-tokenTransfers');
         if (txsEl && stats.tokenTransfers) {
-            txsEl.textContent = stats.tokenTransfers.toLocaleString() + " txs"
+            txsEl.innerHTML = `${stats.tokenTransfers.toLocaleString()} <span class="unit">transfers</span>`;
         }
 
         // Update Mining Calculator values

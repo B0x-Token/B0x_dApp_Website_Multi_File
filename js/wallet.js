@@ -85,9 +85,11 @@ export function setUserAddress(address) {
  * @param {Object} newProvider - Ethers provider instance
  * @param {Object} newSigner - Ethers signer instance
  */
-export function setProvider(newProvider, newSigner) {
+export function setProvider(newProvider, newSigner = null) {
     provider = newProvider;
-    signer = newSigner;
+    if (newSigner !== null) {
+        signer = newSigner;
+    }
 }
 
 /**
@@ -95,8 +97,26 @@ export function setProvider(newProvider, newSigner) {
  * @param {Object} newProvider - Ethers provider instance
  * @param {Object} newSigner - Ethers signer instance
  */
-export function setProviderETH(newProvider, newSigner) {
+export function setProviderETH(newProvider, newSigner = null) {
     providerETH = newProvider;
+    if (newSigner !== null) {
+        signerETH = newSigner;
+    }
+}
+
+/**
+ * Update signer only (for window.signer setter)
+ * @param {Object} newSigner - Ethers signer instance
+ */
+export function setSigner(newSigner) {
+    signer = newSigner;
+}
+
+/**
+ * Update ETH signer only (for window.signerETH setter)
+ * @param {Object} newSigner - Ethers signer instance
+ */
+export function setSignerETH(newSigner) {
     signerETH = newSigner;
 }
 
@@ -142,12 +162,21 @@ export async function checkWalletConnection() {
             if (accounts.length > 0) {
                 // Quick minimal setup - don't block on full connectWallet
                 userAddress = accounts[0];
+                window.userAddress = accounts[0]; // Set window.userAddress for global access
                 walletConnected = true;
+                window.walletConnected = true;
                 provider = new ethers.providers.Web3Provider(window.ethereum);
+                window.provider = provider;
                 signer = provider.getSigner();
+                window.signer = signer;
 
                 // Update UI immediately
                 await updateWalletUI(userAddress, true);
+
+                // Fetch balances immediately (uses multicall - single RPC call)
+                if (window.fetchBalances) {
+                    window.fetchBalances().catch(e => console.warn('Initial fetchBalances:', e));
+                }
 
                 // Run full data loading in background (non-blocking)
                 connectWallet().catch(e => console.warn('Background wallet data loading:', e));
@@ -755,10 +784,15 @@ export async function setupWalletListeners() {
                 }
             }
 
-            // Get token IDs owned by new account
+            // Trigger data refresh for new account
+            if (window.triggerRefresh) {
+                window.triggerRefresh();
+            }
+
+            // Get token IDs owned by new account (force refresh)
             if (window.getTokenIDsOwnedByMetamask) {
                 try {
-                    await window.getTokenIDsOwnedByMetamask();
+                    await window.getTokenIDsOwnedByMetamask(true); // Force refresh for new account
                 } catch (e) {
                     console.warn('Failed to get token IDs on account change:', e);
                 }

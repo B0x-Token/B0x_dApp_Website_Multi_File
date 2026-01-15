@@ -11,6 +11,7 @@
 // ============================================
 // STATE VARIABLES
 // ============================================
+import { triggerRefresh } from './data-loader.js';
 
 let count = 50;
 let interval = null;
@@ -222,10 +223,12 @@ export async function runReloadFunctions(fromChecker = false, fromReset = true) 
             if (window.switchToBase) await window.switchToBase();
         }
 
+  await new Promise(resolve => setTimeout(resolve, 200));
         // Get reward stats
         if (window.getRewardStats) {
             await window.getRewardStats();
         }
+  await new Promise(resolve => setTimeout(resolve, 200));
 
         // Get price ratio
         if (window.throttledGetSqrtRtAndPriceRatio) {
@@ -239,6 +242,10 @@ export async function runReloadFunctions(fromChecker = false, fromReset = true) 
         if (fromChecker && window.GetRewardAPY) {
             await window.GetRewardAPY();
         }
+
+  await new Promise(resolve => setTimeout(resolve, 200));
+        triggerRefresh();
+
     } catch (error) {
         console.error('Error during reload:', error);
     } finally {

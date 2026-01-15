@@ -4583,7 +4583,7 @@ async function depositNFTStake() {
         enableButton('depositNFTStakeBtn', 'Deposit NFT');
 
         fetchBalances();
-        await getTokenIDsOwnedByMetamask();
+        await getTokenIDsOwnedByMetamask(true); // Force refresh after stake
 
 
         await loadPositionsIntoDappSelections();
@@ -4872,7 +4872,7 @@ async function decreaseLiquidityStaking() {
         // Using async/await with setTimeout (most common)
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        await getTokenIDsOwnedByMetamask();
+        await getTokenIDsOwnedByMetamask(true); // Force refresh after decrease
         await getRewardStats();
 
     } catch (error) {
@@ -5303,7 +5303,7 @@ async function decreaseLiquidity() {
         // Using async/await with setTimeout (most common)
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        getTokenIDsOwnedByMetamask();
+        getTokenIDsOwnedByMetamask(true); // Force refresh after decrease
     } catch (error) {
 
         enableButton('decreaseLiquidityBtn', 'Decrease Liquidity and Claim Fees');
@@ -5616,7 +5616,7 @@ async function increaseLiquidityStaking() {
 
     // Using async/await with setTimeout (most common)
     await new Promise(resolve => setTimeout(resolve, 1000));
-    await getTokenIDsOwnedByMetamask();
+    await getTokenIDsOwnedByMetamask(true); // Force refresh after increase
 
     // If you want to use these values for further operations
     // For example, if there's a deploy function that uses the salt
@@ -6008,7 +6008,7 @@ async function increaseLiquidity() {
         fetchBalances();
         // Using async/await with setTimeout (most common)
         await new Promise(resolve => setTimeout(resolve, 1000));
-        await getTokenIDsOwnedByMetamask();
+        await getTokenIDsOwnedByMetamask(true); // Force refresh after increase
         // If you want to use these values for further operations
         // For example, if there's a deploy function that uses the salt
         // await UniV4Hook.deploy(validSalt);
@@ -14096,7 +14096,7 @@ async function getCreatePosition() {
         enableButton('getCreatePositionBtn', 'Create Position');
         fetchBalances();
 
-        await getTokenIDsOwnedByMetamask();
+        await getTokenIDsOwnedByMetamask(true); // Force refresh after create
         await checkAdminAccess();
 
 
@@ -14813,7 +14813,7 @@ async function withdrawStake() {
         }
         fetchBalances();
 
-        await getTokenIDsOwnedByMetamask();
+        await getTokenIDsOwnedByMetamask(true); // Force refresh after unstake
 
 
         await loadPositionsIntoDappSelections();
@@ -19741,7 +19741,7 @@ let ethblockstartB0x = 35930446;
 
     const formattedNumberfffff23 = new Intl.NumberFormat(navigator.language).format(totalZKTC_Calculated.toFixed(0));
 
-    document.querySelector('.SuccessfulMintTransactions').innerHTML = "<b> " + (total_tx_count).toLocaleString() + " </b> txs";
+    document.querySelector('.SuccessfulMintTransactions').innerHTML = (total_tx_count).toLocaleString() + ' <span class="unit">txs</span>';
 
     /* add the last row (totals) with proper styling */
     innerhtml_buffer += '<tr class="miner-row"><td style="border-bottom: 0rem;">TOTAL:</td><td class="stat-value" style="border-bottom: 0rem;">'

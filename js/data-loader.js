@@ -380,45 +380,72 @@ export async function mainRPCStarterForPositions() {
     console.log("Config RPC URL:", CONFIG.RPC_URL);
     console.log("Config Data URL:", CONFIG.DATA_URL);
 
-    // Try to load cached data from localStorage first
+    // Compare localStorage vs remote data and use whichever has higher block number
     const LOCAL_STORAGE_KEY = 'testnet_uniswap_v4_local_data';
-    const LOCAL_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours max age for local cache
     let loadedFromLocal = false;
+    let remoteBlock = 0;
+    let localBlock = 0;
 
+    // First, fetch remote data to get its current_block
+    let remoteData = null;
     try {
-        const localData = loadDataLocally(LOCAL_STORAGE_KEY);
-        if (localData && localData.metadata && localData.valid_positions && localData.nft_owners) {
-            const lastUpdated = new Date(localData.metadata.last_updated).getTime();
-            const cacheAge = Date.now() - lastUpdated;
+        console.log("Fetching remote data to compare block numbers...");
+        const response = await fetch(CONFIG.DATA_URL);
+        if (response.ok) {
+            remoteData = await response.json();
+            remoteBlock = remoteData?.metadata?.current_block || 0;
+            console.log(`Remote data current_block: ${remoteBlock}`);
+        }
+    } catch (error) {
+        console.warn("Failed to fetch remote data for comparison:", error);
+    }
 
-            if (cacheAge < LOCAL_CACHE_MAX_AGE) {
-                // Use cached data
-                validPositions = localData.valid_positions || [];
-                nftOwners = localData.nft_owners || {};
-                currentBlockzzzz = localData.metadata.current_block || CONFIG.START_BLOCK;
-
-                console.log(`✓ Loaded position data from localStorage (${Math.round(cacheAge / 60000)} min old)`);
-                console.log(`  - ${validPositions.length} valid positions`);
-                console.log(`  - ${Object.keys(nftOwners).length} NFT owners`);
-                console.log(`  - Continuing from block ${currentBlockzzzz}`);
-                loadedFromLocal = true;
-            } else {
-                console.log("Local cache expired, will fetch from remote");
-            }
+    // Check localStorage data
+    let localData = null;
+    try {
+        localData = loadDataLocally(LOCAL_STORAGE_KEY);
+        if (localData && localData.metadata) {
+            localBlock = localData.metadata.current_block || 0;
+            console.log(`localStorage current_block: ${localBlock}`);
         }
     } catch (error) {
         console.warn("Failed to load from localStorage:", error);
     }
 
-    // If no local data, fetch from remote URL
-    if (!loadedFromLocal) {
-        try {
-            await fetchDataFromUrl();
-            console.log("Position data loaded from remote source");
-        } catch (error) {
-            console.warn("Failed to load position data from URL:", error);
-            console.log("Continuing with empty position data...");
-        }
+    // Decide which data source to use based on block numbers
+    if (localData && localBlock > remoteBlock) {
+        // Use localStorage data - it's ahead of remote
+        validPositions = localData.valid_positions || [];
+        nftOwners = localData.nft_owners || {};
+        currentBlockzzzz = localBlock;
+
+        const cacheAge = Date.now() - new Date(localData.metadata.last_updated).getTime();
+        console.log(`✓ Using localStorage data (block ${localBlock} > remote block ${remoteBlock})`);
+        console.log(`  - Cache is ${Math.round(cacheAge / 60000)} min old`);
+        console.log(`  - ${validPositions.length} valid positions`);
+        console.log(`  - ${Object.keys(nftOwners).length} NFT owners`);
+        console.log(`  - Continuing from block ${currentBlockzzzz}`);
+        loadedFromLocal = true;
+    } else if (remoteData) {
+        // Use remote data - it's ahead or equal
+        if (remoteData.nft_owners) nftOwners = remoteData.nft_owners;
+        if (remoteData.valid_positions) validPositions = remoteData.valid_positions;
+        if (remoteData.metadata?.current_block) currentBlockzzzz = remoteData.metadata.current_block;
+
+        console.log(`✓ Using remote data (block ${remoteBlock} >= localStorage block ${localBlock})`);
+        console.log(`  - ${validPositions.length} valid positions`);
+        console.log(`  - ${Object.keys(nftOwners).length} NFT owners`);
+    } else if (localData) {
+        // Fallback to localStorage if remote failed
+        validPositions = localData.valid_positions || [];
+        nftOwners = localData.nft_owners || {};
+        currentBlockzzzz = localBlock || CONFIG.START_BLOCK;
+
+        console.log(`✓ Fallback to localStorage (remote unavailable)`);
+        console.log(`  - ${validPositions.length} valid positions`);
+        loadedFromLocal = true;
+    } else {
+        console.log("No cached data available, starting fresh...");
     }
 
     // Mark as complete since we've attempted to load the data
@@ -705,7 +732,7 @@ export async function getPoolAndPositionInfo(tokenId) {
  */
 export async function multicallGetPoolAndPositionInfo(tokenIds) {
     if (tokenIds.length === 0) return [];
-
+    console.log("CALLING multicallGetPoolAndPositionInfo IMPORTANT IMPORANT");
     const provider = new ethers.providers.JsonRpcProvider(CONFIG.RPC_URL);
     const multicallAddress = CONFIG.MULTICALL_ADDRESS || "0xcA11bde05977b3631167028862bE2a173976CA11";
     const nftAddress = CONFIG.NFT_ADDRESS || "0x7C5f5A4bBd8fD63184577525326123B519429bDc";
