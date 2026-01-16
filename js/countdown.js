@@ -246,6 +246,19 @@ export async function runReloadFunctions(fromChecker = false, fromReset = true) 
   await new Promise(resolve => setTimeout(resolve, 200));
         triggerRefresh();
 
+        // Refresh swap estimate if on swap page and amount is entered
+        if (window.getEstimate) {
+            try {
+                const amountInput = document.querySelector('#swap .form-group:nth-child(5) input');
+                const amount = parseFloat(amountInput?.value) || 0;
+                if (amount > 0) {
+                    await window.getEstimate();
+                }
+            } catch (e) {
+                console.warn("getEstimate failed:", e);
+            }
+        }
+
     } catch (error) {
         console.error('Error during reload:', error);
     } finally {
