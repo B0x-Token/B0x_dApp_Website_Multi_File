@@ -1775,12 +1775,18 @@ export function updateStakePositionInfo() {
     console.log("Staked Position: ", position);
 
     if (!position) {
+        // During initial load, keep loading message; otherwise show "create position" message
+        if (window.getIsInitialPositionLoad && window.getIsInitialPositionLoad()) {
+            console.log('updateStakePositionInfo: No position, keeping loading message during initial load');
+            return;
+        }
+
         // Update current position info card
         const infoCard = document.querySelector('#stake-increase .info-card:nth-child(5)');
         if (infoCard) {
             infoCard.innerHTML = `
                 <h3>Current Selected Position</h3>
-                <p>Create position then Stake it in order to increase liquidity. No position Staked currently.</p>
+                <p>Stake Position to increase liquidity on it</p>
             `;
         }
 
@@ -1873,12 +1879,18 @@ export function updateStakeDecreasePositionInfo() {
     const position = stakingPositionData[selectedPositionId];
 
     if (!position) {
+        // During initial load, keep loading message; otherwise show "create position" message
+        if (window.getIsInitialPositionLoad && window.getIsInitialPositionLoad()) {
+            console.log('updateStakeDecreasePositionInfo: No position, keeping loading message during initial load');
+            return;
+        }
+
         // Update position details info card
         const infoCard = document.querySelector('#stake-decrease .info-card:nth-child(4)');
         if (infoCard) {
             infoCard.innerHTML = `
-                <h3>Position Details</h3>
-                <p>Stake a Uniswap V4 NFT in order to decrease liquidity. Nothing Staked currently</p>
+                <h3>Current Selected Position</h3>
+                <p>Stake Position to decrease liquidity on it</p>
             `;
         }
 

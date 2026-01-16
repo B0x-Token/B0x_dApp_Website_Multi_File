@@ -1329,9 +1329,15 @@ export function updatePositionInfoMAIN_STAKING() {
     const position = positionData[selectedPositionId];
 
     if (!position) {
+        // During initial load, keep loading message; otherwise show "create position" message
+        if (window.getIsInitialPositionLoad && window.getIsInitialPositionLoad()) {
+            console.log('updatePositionInfoMAIN_STAKING: No position, keeping loading message during initial load');
+            return;
+        }
+
         const infoCard = document.querySelector('#staking-main-page .info-card2');
         infoCard.innerHTML = `<h3>NFT Position Info</h3>
-                                <p>Create Position to Stake Position</p>`;
+                                <p>Please Create a Position in order to Deposit the Uniswap v4 NFT into staking</p>`;
         document.getElementById('estimatedRewards').value = "0%";
         return;
     }
@@ -1357,9 +1363,15 @@ export function updatePositionInfoMAIN_UNSTAKING() {
     const position = stakingPositionData[selectedPositionId];
 
     if (!position) {
+        // During initial load, keep loading message; otherwise show "no positions" message
+        if (window.getIsInitialPositionLoad && window.getIsInitialPositionLoad()) {
+            console.log('updatePositionInfoMAIN_UNSTAKING: No position, keeping loading message during initial load');
+            return;
+        }
+
         const infoCard = document.querySelector('#staking-main-page .info-card');
         infoCard.innerHTML = `<h3>Token Withdrawing</h3>
-                            <p>Unstake your Unsiwap NFT tokens below.  Currently you have no staked positions.</p>
+                            <p>Deposit Position to Staking to Withdraw Position</p>
                             `;
         return;
     }
@@ -1726,7 +1738,10 @@ export function updatePositionDropdown() {
         }
     }
 
-    positionSelect2.innerHTML = '';
+    // Only clear select if we have data OR initial load is complete
+    if (Object.keys(positionData).length > 0 || !(window.getIsInitialPositionLoad && window.getIsInitialPositionLoad())) {
+        positionSelect2.innerHTML = '';
+    }
 
     Object.values(positionData).forEach(position => {
         const option = document.createElement('option');

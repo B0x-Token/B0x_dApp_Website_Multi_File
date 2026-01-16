@@ -61,6 +61,11 @@ let userManualSelectionWithdraw = null;
 let userManualSelectionStakeIncrease = null;
 let userManualSelectionStakeDecrease = null;
 
+// Initial position load tracking - shows loading UI during first wallet connection
+let isInitialPositionLoad = true;
+export function getIsInitialPositionLoad() { return isInitialPositionLoad; }
+export function setIsInitialPositionLoad(value) { isInitialPositionLoad = value; }
+
 // Global position tracking variables
 let tokenAddress = tokenAddresses["B0x"];
 let Address_ZEROXBTC_TESTNETCONTRACT = tokenAddresses["0xBTC"];
@@ -87,6 +92,100 @@ const CONFIG = {
         hooks: HookAddress
     }
 };
+
+// ============================================
+// LOADING STATE FUNCTIONS
+// ============================================
+
+/**
+ * Shows loading state in all position selectors and info cards during initial wallet connection
+ * @returns {void}
+ */
+export function showPositionsLoadingState() {
+    const loadingMessage = 'Loading Positions, Please wait while positions are loaded into dApp';
+    console.log("Called showPositionsLoadingState ");
+    // Update increase page
+    const increaseSelect = document.querySelector('#increase select');
+    if (increaseSelect) {
+        increaseSelect.innerHTML = `<option value="">${loadingMessage}</option>`;
+    }
+    const increaseInfoCard = document.querySelector('#increase .info-card:nth-child(5)');
+    if (increaseInfoCard) {
+        increaseInfoCard.innerHTML = `
+            <h3>Current Selected Position</h3>
+            <p>${loadingMessage}</p>
+        `;
+    }
+
+    // Update decrease page
+    const decreaseSelect = document.querySelector('#decrease select');
+    if (decreaseSelect) {
+        decreaseSelect.innerHTML = `<option value="">${loadingMessage}</option>`;
+    }
+    const decreaseInfoCard = document.querySelector('#decrease .info-card:nth-child(4)');
+    if (decreaseInfoCard) {
+        decreaseInfoCard.innerHTML = `
+            <h3>Current Selected Position</h3>
+            <p>${loadingMessage}</p>
+        `;
+    }
+
+    // Update stake-increase page
+    const stakeIncreaseSelect = document.querySelector('#stake-increase select');
+
+        console.log("showPositionsLoadingState Found stake increase select")
+    if (stakeIncreaseSelect) {
+        stakeIncreaseSelect.innerHTML = `<option value="">${loadingMessage}</option>`;
+    }
+    const stakeIncreaseInfoCard = document.querySelector('#stake-increase .info-card:nth-child(5)');
+    if (stakeIncreaseInfoCard) {
+        stakeIncreaseInfoCard.innerHTML = `
+            <h3>Current Selected Position</h3>
+            <p>${loadingMessage}</p>
+        `;
+    }
+
+    // Update stake-decrease page
+    const stakeDecreaseSelect = document.querySelector('#stake-decrease select');
+    if (stakeDecreaseSelect) {
+        stakeDecreaseSelect.innerHTML = `<option value="">${loadingMessage}</option>`;
+    }
+    const stakeDecreaseInfoCard = document.querySelector('#stake-decrease .info-card:nth-child(4)');
+    if (stakeDecreaseInfoCard) {
+        stakeDecreaseInfoCard.innerHTML = `
+            <h3>Current Selected Position</h3>
+            <p>${loadingMessage}</p>
+        `;
+    }
+
+    // Update staking main page - deposit NFT selector
+    const stakingMainSelect = document.querySelector('#staking-main-page select');
+    if (stakingMainSelect) {
+        stakingMainSelect.innerHTML = `<option value="">${loadingMessage}</option>`;
+    }
+    const stakingMainInfoCard = document.querySelector('#staking-main-page .info-card2');
+    if (stakingMainInfoCard) {
+        stakingMainInfoCard.innerHTML = `
+            <h3>NFT Position Info</h3>
+            <p>${loadingMessage}</p>
+        `;
+    }
+
+    // Update staking main page - withdraw NFT selector
+    const stakingWithdrawSelect = document.querySelector('#staking-main-page .form-group2 select');
+    if (stakingWithdrawSelect) {
+        stakingWithdrawSelect.innerHTML = `<option value="">${loadingMessage}</option>`;
+    }
+    const stakingWithdrawInfoCard = document.querySelector('#staking-main-page .info-card');
+    if (stakingWithdrawInfoCard) {
+        stakingWithdrawInfoCard.innerHTML = `
+            <h3>Token Withdrawing</h3>
+            <p>${loadingMessage}</p>
+        `;
+    }
+
+    console.log('Showing positions loading state');
+}
 
 // ============================================
 // HELPER FUNCTIONS
@@ -1425,6 +1524,12 @@ export function updatePositionInfo() {
     const position = positionData[selectedPositionId];
 
     if (!position) {
+        // During initial load, keep loading message; otherwise show "create position" message
+        if (isInitialPositionLoad) {
+            console.log('updatePositionInfo: No position, keeping loading message during initial load');
+            return;
+        }
+
         const infoCard = document.querySelector('#increase .info-card:nth-child(5)');
         infoCard.innerHTML = `
             <h3>Increase Position Liquidity</h3>
@@ -1505,6 +1610,12 @@ export function updateDecreasePositionInfo() {
     const position = positionData[selectedPositionId];
 
     if (!position) {
+        // During initial load, keep loading message; otherwise show "create position" message
+        if (isInitialPositionLoad) {
+            console.log('updateDecreasePositionInfo: No position, keeping loading message during initial load');
+            return;
+        }
+
         const infoCard = document.querySelector('#decrease .info-card:nth-child(4)');
         infoCard.innerHTML = `
             <h3>Decrease Position Liquidity</h3>
@@ -1619,13 +1730,18 @@ export async function loadPositionsIntoDappSelections() {
     console.log("=== loadPositionsIntoDappSelections() called ===");
     console.log("positionData count:", Object.keys(positionData).length);
     console.log("stakingPositionData count:", Object.keys(stakingPositionData).length);
+    console.log("isInitialPositionLoad:", isInitialPositionLoad);
     console.log("Populating all position selectors (regular + staking)...");
 
     // Set up position selector for regular increase
     const positionSelect = document.querySelector('#increase select');
 
     if (positionSelect) {
-        positionSelect.innerHTML = '';
+        // Only clear select if we have data OR initial load is complete
+        // This preserves loading message during initial load when no data yet
+        if (Object.keys(positionData).length > 0 || !isInitialPositionLoad) {
+            positionSelect.innerHTML = '';
+        }
 
         if (Object.keys(positionData).length > 0) {
             if (!positionSelect.hasAttribute('data-selection-tracker')) {
@@ -1681,7 +1797,10 @@ export async function loadPositionsIntoDappSelections() {
     const positionSelect2 = document.querySelector('#decrease select');
 
     if (positionSelect2) {
-        positionSelect2.innerHTML = '';
+        // Only clear select if we have data OR initial load is complete
+        if (Object.keys(positionData).length > 0 || !isInitialPositionLoad) {
+            positionSelect2.innerHTML = '';
+        }
 
         if (Object.keys(positionData).length > 0) {
             if (!positionSelect2.hasAttribute('data-selection-tracker')) {
@@ -1741,7 +1860,10 @@ export async function loadPositionsIntoDappSelections() {
     const stakingMainPageSelect = document.querySelector('#staking-main-page select');
     if (stakingMainPageSelect) {
         const currentStakingValue = stakingMainPageSelect.value;
-        stakingMainPageSelect.innerHTML = '';
+        // Only clear select if we have data OR initial load is complete
+        if (Object.keys(positionData).length > 0 || !isInitialPositionLoad) {
+            stakingMainPageSelect.innerHTML = '';
+        }
 
         if (Object.keys(positionData).length > 0) {
             Object.values(positionData).forEach(position => {
@@ -1762,7 +1884,10 @@ export async function loadPositionsIntoDappSelections() {
     const withdrawNFTSelect = document.querySelector('#staking-main-page .form-group2 select');
     if (withdrawNFTSelect) {
         const currentWithdrawValue = withdrawNFTSelect.value;
-        withdrawNFTSelect.innerHTML = '';
+        // Only clear select if we have data OR initial load is complete
+        if (Object.keys(stakingPositionData).length > 0 || !isInitialPositionLoad) {
+            withdrawNFTSelect.innerHTML = '';
+        }
 
         if (Object.keys(stakingPositionData).length > 0) {
             Object.values(stakingPositionData).forEach(position => {
@@ -1789,7 +1914,10 @@ export async function loadPositionsIntoDappSelections() {
     const stakeIncreaseSelect = document.querySelector('#stake-increase select');
     if (stakeIncreaseSelect) {
         const currentIncreaseValue = stakeIncreaseSelect.value;
-        stakeIncreaseSelect.innerHTML = '';
+        // Only clear select if we have data OR initial load is complete
+        if (Object.keys(stakingPositionData).length > 0 || !isInitialPositionLoad) {
+            stakeIncreaseSelect.innerHTML = '';
+        }
 
         if (Object.keys(stakingPositionData).length > 0) {
             Object.values(stakingPositionData).reverse().forEach(position => {
@@ -1815,7 +1943,10 @@ export async function loadPositionsIntoDappSelections() {
     const stakeDecreaseSelect = document.querySelector('#stake-decrease select');
     if (stakeDecreaseSelect) {
         const currentDecreaseValue = stakeDecreaseSelect.value;
-        stakeDecreaseSelect.innerHTML = '';
+        // Only clear select if we have data OR initial load is complete
+        if (Object.keys(stakingPositionData).length > 0 || !isInitialPositionLoad) {
+            stakeDecreaseSelect.innerHTML = '';
+        }
 
         if (Object.keys(stakingPositionData).length > 0) {
             Object.values(stakingPositionData).forEach(position => {
@@ -1864,6 +1995,48 @@ export async function loadPositionsIntoDappSelections() {
         disableButtonWithSpinner('decreaseLiquidityStakedBtn', "No positions to decrease Liquidity on, stake a position first");
     } else {
         enableButton('decreaseLiquidityStakedBtn', 'Decrease Liquidity of Staked Position');
+    }
+
+    // ========================================
+    // ENSURE INITIAL LOAD FLAG IS CLEARED AND UPDATE ALL INFO CARDS
+    // ========================================
+    // After all selectors are populated (or confirmed empty), clear the flag
+    // and force update all info cards to show correct state
+    if (isInitialPositionLoad) {
+        console.log('loadPositionsIntoDappSelections: Clearing initial load flag and updating all info cards');
+        isInitialPositionLoad = false;
+
+        // Clear selects that still have loading message (when no data)
+        if (Object.keys(positionData).length === 0) {
+            const selectors = ['#increase select', '#decrease select', '#staking-main-page select'];
+            selectors.forEach(sel => {
+                const el = document.querySelector(sel);
+                if (el) el.innerHTML = '';
+            });
+        }
+        if (Object.keys(stakingPositionData).length === 0) {
+            const selectors = ['#stake-increase select', '#stake-decrease select', '#staking-main-page .form-group2 select'];
+            selectors.forEach(sel => {
+                const el = document.querySelector(sel);
+                if (el) el.innerHTML = '';
+            });
+        }
+
+        // Force update all info cards now that flag is cleared
+        updatePositionInfo();
+        updateDecreasePositionInfo();
+        if (typeof window.updateStakePositionInfo === 'function') {
+            window.updateStakePositionInfo();
+        }
+        if (typeof window.updateStakeDecreasePositionInfo === 'function') {
+            window.updateStakeDecreasePositionInfo();
+        }
+        if (typeof window.updatePositionInfoMAIN_STAKING === 'function') {
+            window.updatePositionInfoMAIN_STAKING();
+        }
+        if (typeof window.updatePositionInfoMAIN_UNSTAKING === 'function') {
+            window.updatePositionInfoMAIN_UNSTAKING();
+        }
     }
 }
 

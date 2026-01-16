@@ -25,7 +25,7 @@ import * as Positions from './positions.js';
 import * as Swaps from './swaps.js';
 import * as Convert from './convert.js';
 import { renderContracts, displayNetworkStatus } from './contracts.js';
-import { positionData, stakingPositionData, updatePositionInfo, updateTotalLiqIncrease, updateDecreasePositionInfo, updatePercentage } from './positions.js';
+import { positionData, stakingPositionData, updatePositionInfo, updateTotalLiqIncrease, updateDecreasePositionInfo, updatePercentage, getIsInitialPositionLoad } from './positions.js';
 import { updateStakingStats, populateStakingManagementData } from './staking.js';
 import { startCountdown } from './countdown.js';
 import { initializeMaxButtons } from './max-buttons.js';
@@ -403,13 +403,16 @@ export function setupDOMListeners() {
     // Regular position increase selector
     const positionSelect = document.querySelector('#increase select');
     if (positionSelect) {
-        positionSelect.innerHTML = '';
-        Object.values(positionData).forEach(position => {
-            const option = document.createElement('option');
-            option.value = position.id;
-            option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
-            positionSelect.appendChild(option);
-        });
+        // Only clear and populate if we have data OR initial load is complete
+        if (Object.keys(positionData).length > 0 || !getIsInitialPositionLoad()) {
+            positionSelect.innerHTML = '';
+            Object.values(positionData).forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+                positionSelect.appendChild(option);
+            });
+        }
 
         positionSelect.addEventListener('change', updatePositionInfo);
         positionSelect.addEventListener('change', updateTotalLiqIncrease);
@@ -419,13 +422,16 @@ export function setupDOMListeners() {
     // Regular position decrease selector
     const decreasePositionSelect = document.querySelector('#decrease select');
     if (decreasePositionSelect) {
-        decreasePositionSelect.innerHTML = '';
-        Object.values(positionData).forEach(position => {
-            const option = document.createElement('option');
-            option.value = position.id;
-            option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
-            decreasePositionSelect.appendChild(option);
-        });
+        // Only clear and populate if we have data OR initial load is complete
+        if (Object.keys(positionData).length > 0 || !getIsInitialPositionLoad()) {
+            decreasePositionSelect.innerHTML = '';
+            Object.values(positionData).forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+                decreasePositionSelect.appendChild(option);
+            });
+        }
 
         decreasePositionSelect.addEventListener('change', updateDecreasePositionInfo);
         updateDecreasePositionInfo();
@@ -434,13 +440,16 @@ export function setupDOMListeners() {
     // Staking main page withdraw NFT selector
     const positionSelectMainPageWithdrawNFT = document.querySelector('#staking-main-page .form-group2 select');
     if (positionSelectMainPageWithdrawNFT) {
-        positionSelectMainPageWithdrawNFT.innerHTML = '';
-        Object.values(stakingPositionData).forEach(position => {
-            const option = document.createElement('option');
-            option.value = position.id;
-            option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
-            positionSelectMainPageWithdrawNFT.appendChild(option);
-        });
+        // Only clear and populate if we have data OR initial load is complete
+        if (Object.keys(stakingPositionData).length > 0 || !getIsInitialPositionLoad()) {
+            positionSelectMainPageWithdrawNFT.innerHTML = '';
+            Object.values(stakingPositionData).forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                positionSelectMainPageWithdrawNFT.appendChild(option);
+            });
+        }
 
         positionSelectMainPageWithdrawNFT.addEventListener('change', updatePositionInfoMAIN_UNSTAKING);
         updatePositionInfoMAIN_UNSTAKING();
@@ -450,13 +459,16 @@ export function setupDOMListeners() {
     // Reversed order so newest positions appear first (to reset largest penalty first)
     const stakePositionSelect = document.querySelector('#stake-increase select');
     if (stakePositionSelect) {
-        stakePositionSelect.innerHTML = '';
-        Object.values(stakingPositionData).reverse().forEach(position => {
-            const option = document.createElement('option');
-            option.value = position.id;
-            option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
-            stakePositionSelect.appendChild(option);
-        });
+        // Only clear and populate if we have data OR initial load is complete
+        if (Object.keys(stakingPositionData).length > 0 || !getIsInitialPositionLoad()) {
+            stakePositionSelect.innerHTML = '';
+            Object.values(stakingPositionData).reverse().forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                stakePositionSelect.appendChild(option);
+            });
+        }
 
         if (typeof window.updateStakePositionInfo === 'function') {
             stakePositionSelect.addEventListener('change', window.updateStakePositionInfo);
@@ -467,13 +479,16 @@ export function setupDOMListeners() {
     // Stake decrease position selector
     const stakeDecreasePositionSelect = document.querySelector('#stake-decrease select');
     if (stakeDecreasePositionSelect) {
-        stakeDecreasePositionSelect.innerHTML = '';
-        Object.values(stakingPositionData).forEach(position => {
-            const option = document.createElement('option');
-            option.value = position.id;
-            option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
-            stakeDecreasePositionSelect.appendChild(option);
-        });
+        // Only clear and populate if we have data OR initial load is complete
+        if (Object.keys(stakingPositionData).length > 0 || !getIsInitialPositionLoad()) {
+            stakeDecreasePositionSelect.innerHTML = '';
+            Object.values(stakingPositionData).forEach(position => {
+                const option = document.createElement('option');
+                option.value = position.id;
+                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                stakeDecreasePositionSelect.appendChild(option);
+            });
+        }
 
         if (typeof window.updateStakeDecreasePositionInfo === 'function') {
             stakeDecreasePositionSelect.addEventListener('change', window.updateStakeDecreasePositionInfo);

@@ -321,6 +321,7 @@ window.formatAddress = UI.formatAddress;
 
 // Dropdowns
 window.loadPositionsIntoDappSelections = Positions.loadPositionsIntoDappSelections;
+window.updatePositionInfoMAIN_STAKING = UI.updatePositionInfoMAIN_STAKING;
 window.updatePositionInfoMAIN_UNSTAKING = UI.updatePositionInfoMAIN_UNSTAKING;
 
 // Table rendering
@@ -472,6 +473,9 @@ window.updateTotalLiqIncrease = Positions.updateTotalLiqIncrease;
 window.updateDecreasePositionInfo = Positions.updateDecreasePositionInfo;
 window.updatePercentage = Positions.updatePercentage;
 window.loadPositionsIntoDappSelections = Positions.loadPositionsIntoDappSelections;
+window.showPositionsLoadingState = Positions.showPositionsLoadingState;
+window.setIsInitialPositionLoad = Positions.setIsInitialPositionLoad;
+window.getIsInitialPositionLoad = Positions.getIsInitialPositionLoad;
 
 // Positions Ratio module
 window.getSqrtRtAndPriceRatio = PositionsRatio.getSqrtRtAndPriceRatio;

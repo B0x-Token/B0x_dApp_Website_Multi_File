@@ -173,6 +173,12 @@ export async function checkWalletConnection() {
                 // Update UI immediately
                 await updateWalletUI(userAddress, true);
 
+                // Show loading state in position selectors during auto-reconnect
+                if (window.showPositionsLoadingState) {
+                    console.log("SHowPositionLoadingright?");
+                    window.showPositionsLoadingState();
+                }
+
                 // Fetch balances immediately (uses multicall - single RPC call)
                 if (window.fetchBalances) {
                     window.fetchBalances().catch(e => console.warn('Initial fetchBalances:', e));
@@ -444,6 +450,11 @@ export async function connectWallet(resumeFromStep = null) {
         await Promise.all(dataPromises);
 
         // SEQUENTIAL: These depend on previous data
+        // Show loading state in position selectors during initial load
+        if (window.showPositionsLoadingState && window.getIsInitialPositionLoad && window.getIsInitialPositionLoad()) {
+            window.showPositionsLoadingState();
+        }
+
         // Get token IDs (needs position data from runContinuous)
         if (window.getTokenIDsOwnedByMetamask) {
             try {
@@ -451,6 +462,11 @@ export async function connectWallet(resumeFromStep = null) {
             } catch (e) {
                 console.warn('getTokenIDs error:', e);
             }
+        }
+
+        // Clear initial load flag BEFORE loading positions into UI
+        if (window.setIsInitialPositionLoad) {
+            window.setIsInitialPositionLoad(false);
         }
 
         // Load positions into UI (needs token IDs)
@@ -802,6 +818,14 @@ export async function setupWalletListeners() {
                 window.triggerRefresh();
             }
 
+            // Show loading state for position selectors during account change
+            if (window.setIsInitialPositionLoad) {
+                window.setIsInitialPositionLoad(true);
+            }
+            if (window.showPositionsLoadingState) {
+                window.showPositionsLoadingState();
+            }
+
             // Get token IDs owned by new account (force refresh)
             if (window.getTokenIDsOwnedByMetamask) {
                 try {
@@ -809,6 +833,11 @@ export async function setupWalletListeners() {
                 } catch (e) {
                     console.warn('Failed to get token IDs on account change:', e);
                 }
+            }
+
+            // Clear initial load flag BEFORE loading positions into UI
+            if (window.setIsInitialPositionLoad) {
+                window.setIsInitialPositionLoad(false);
             }
 
             // Load positions into UI
