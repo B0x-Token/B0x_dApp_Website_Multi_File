@@ -431,6 +431,7 @@ export function hideLoadingScreen() {
 // =============================================================================
 
 let PreviousTabName = "";
+let statsDataLoadedAt = 0; // Timestamp of last stats load
 
 /**
  * Switches main application tab
@@ -489,9 +490,11 @@ export async function switchTab(tabName) {
         // Always ensure stats-home is visible when switching to stats tab
         switchTab2('stats-home');
 
-        // Only load data if coming from a different tab (avoid duplicate calls)
-        if (previousTab != 'stats') {
-            console.log("SwitchTab2 - Loading stats data");
+        // Only load data if coming from a different tab or 3 minutes have passed
+        const statsStale = (Date.now() - statsDataLoadedAt) > 180000; // 3 minutes
+        if (previousTab != 'stats' && statsStale) {
+            statsDataLoadedAt = Date.now();
+            console.log("SwitchTab - Loading stats data");
 
             // First run SUPER COMBINED MULTICALL to populate window.cachedContractStats
             if (typeof window.getRewardStats === 'function') {
@@ -760,6 +763,21 @@ export async function switchTab2(tabName) {
         loadData();
     } else if (tabName == 'rich-list') {
         loadData();
+    } else if ((tabName == 'stats-home' || tabName == 'stats-mining-calc') && (Date.now() - statsDataLoadedAt) > 180000) {
+        // Load stats data when switching to tabs that need it (with 3 min cache)
+        statsDataLoadedAt = Date.now();
+        if (typeof window.getRewardStats === 'function') {
+            await window.getRewardStats();
+        }
+        if (typeof window.GetContractStatsWithMultiCall === 'function') {
+            const stats = await window.GetContractStatsWithMultiCall();
+            if (stats && typeof window.updateStatsDisplay === 'function') {
+                window.updateStatsDisplay(stats);
+            }
+        }
+        if (typeof window.updateAllMinerInfoFirst === 'function') {
+            await window.updateAllMinerInfoFirst();
+        }
     }
     updateURL(tabName);
 
@@ -1766,6 +1784,7 @@ export function updatePositionDropdown() {
 
 // State variables for staking rich list (loadData2)
 let stakingData = null;
+let allStakingData = []; // Original full array for filtering
 let filteredData = [];
 let currentPage = 1;
 let pageSize = 25;
@@ -1807,10 +1826,11 @@ export async function loadData2() {
         updateStats55();
 
         // Convert users object to array for easier handling
-        filteredData = Object.entries(stakingData.users).map(([address, data]) => ({
+        allStakingData = Object.entries(stakingData.users).map(([address, data]) => ({
             address,
             ...data
         }));
+        filteredData = [...allStakingData];
 
         // Initial render
         currentPage = 1;
@@ -1838,10 +1858,11 @@ export async function loadData2() {
             updateStats55();
 
             // Convert users object to array for easier handling
-            filteredData = Object.entries(stakingData.users).map(([address, data]) => ({
+            allStakingData = Object.entries(stakingData.users).map(([address, data]) => ({
                 address,
                 ...data
             }));
+            filteredData = [...allStakingData];
 
             // Initial render
             currentPage = 1;
@@ -2096,6 +2117,38 @@ export function filterData2() {
 }
 
 /**
+ * Changes page for staking rich list pagination
+ * @param {number} page - Page number to navigate to
+ */
+export function changePage2(page) {
+    const totalPages = Math.ceil(filteredData.length / pageSize);
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    renderTable2();
+    renderPagination2();
+}
+
+/**
+ * Filters staking rich list data based on search input
+ */
+export function filterData() {
+    const searchBox = document.getElementById('searchBox');
+    const searchTerm = searchBox ? searchBox.value.toLowerCase() : '';
+
+    if (searchTerm === '' || allStakingData.length === 0) {
+        filteredData = [...allStakingData];
+    } else {
+        filteredData = allStakingData.filter(user =>
+            user.address.toLowerCase().includes(searchTerm)
+        );
+    }
+
+    currentPage = 1;
+    renderTable2();
+    renderPagination2();
+}
+
+/**
  * Initializes event listeners for rich list controls (sorting, page size, search)
  */
 export function initRichListEventListeners() {
@@ -2142,6 +2195,23 @@ export function initRichListEventListeners() {
                 filteredData2 = [...combinedData];
                 renderTable();
             }
+        });
+    }
+
+    // Staking rich list - Search box event listener
+    const searchBox = document.getElementById('searchBox');
+    if (searchBox) {
+        searchBox.addEventListener('input', filterData);
+    }
+
+    // Staking rich list - Page size dropdown event listener
+    const pageSizeEl = document.getElementById('pageSize');
+    if (pageSizeEl) {
+        pageSizeEl.addEventListener('change', function () {
+            pageSize = parseInt(this.value);
+            currentPage = 1;
+            renderTable2();
+            renderPagination2();
         });
     }
 
@@ -2729,10 +2799,10 @@ export async function updateStatsDisplay(stats) {
     console.log('Updating stats display with:', stats);
 
     try {
-        // Update Epoch Count
+        // Update Epoch Count (adding 24420 from previous contract)
         const epochCountEl = document.querySelector('.stat-value-epochCount');
         if (epochCountEl && stats.epochCount) {
-            epochCountEl.textContent = parseInt(stats.epochCount).toLocaleString();
+            epochCountEl.textContent = (parseInt(stats.epochCount) + 24420).toLocaleString();
         }
 
         // Update Current Reward Era
@@ -3933,6 +4003,8 @@ export default {
 
     // Rich List Controls
     changePage,
+    changePage2,
+    filterData,
     filterData2,
     initRichListEventListeners
 };

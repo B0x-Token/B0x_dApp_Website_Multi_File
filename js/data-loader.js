@@ -135,7 +135,7 @@ export function triggerRefresh() { forceRefresh = true; }
 
 // Rate limiting for contract stats
 let lastContractStatsUpdate = 0;
-let cachedContractStats = null;
+export let cachedContractStats = null;
 const CONTRACT_STATS_COOLDOWN = 180000; // 180 seconds in milliseconds
 
 /**
