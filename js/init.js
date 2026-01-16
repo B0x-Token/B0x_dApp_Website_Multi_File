@@ -84,7 +84,6 @@ export async function initializeDApp() {
                 console.warn('Position monitoring failed:', posError);
             }
         }, 500);
-        await new Promise(resolve => setTimeout(resolve, 500));
 
         updateLoadingStatus('Initializing interface...');
         // Display network status
@@ -110,7 +109,7 @@ export async function initializeDApp() {
             updateLoadingStatus('Loading... (data will appear shortly)');
         }
 
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 200));
         hideLoadingScreen();
 
         // Continue loading remaining data in background (non-blocking)

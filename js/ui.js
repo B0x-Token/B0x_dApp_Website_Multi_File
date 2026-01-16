@@ -757,28 +757,6 @@ import { initEthers2, updateGraphData } from "./charts.js";
  * @param {string} tabName - Stats tab name
  */
 export async function switchTab2(tabName) {
-    if (tabName == 'stats-staking-rich-list') {
-        loadData2();
-    } else if (tabName == 'stats-rich-list') {
-        loadData();
-    } else if (tabName == 'rich-list') {
-        loadData();
-    } else if ((tabName == 'stats-home' || tabName == 'stats-mining-calc') && (Date.now() - statsDataLoadedAt) > 180000) {
-        // Load stats data when switching to tabs that need it (with 3 min cache)
-        statsDataLoadedAt = Date.now();
-        if (typeof window.getRewardStats === 'function') {
-            await window.getRewardStats();
-        }
-        if (typeof window.GetContractStatsWithMultiCall === 'function') {
-            const stats = await window.GetContractStatsWithMultiCall();
-            if (stats && typeof window.updateStatsDisplay === 'function') {
-                window.updateStatsDisplay(stats);
-            }
-        }
-        if (typeof window.updateAllMinerInfoFirst === 'function') {
-            await window.updateAllMinerInfoFirst();
-        }
-    }
     updateURL(tabName);
 
     // Remove active class from all sub-tabs and sub-pages
@@ -800,7 +778,29 @@ export async function switchTab2(tabName) {
         selectedPage.style.display = 'block';
     }
 
-    if (tabName == "stats-graphs") {
+    // Now load data AFTER the page is visible (so "loading..." text shows)
+    if (tabName == 'stats-staking-rich-list') {
+        loadData2();
+    } else if (tabName == 'stats-rich-list') {
+        loadData();
+    } else if (tabName == 'rich-list') {
+        loadData();
+    } else if ((tabName == 'stats-home' || tabName == 'stats-mining-calc') && (Date.now() - statsDataLoadedAt) > 180000) {
+        // Load stats data when switching to tabs that need it (with 3 min cache)
+        statsDataLoadedAt = Date.now();
+        if (typeof window.getRewardStats === 'function') {
+            await window.getRewardStats();
+        }
+        if (typeof window.GetContractStatsWithMultiCall === 'function') {
+            const stats = await window.GetContractStatsWithMultiCall();
+            if (stats && typeof window.updateStatsDisplay === 'function') {
+                window.updateStatsDisplay(stats);
+            }
+        }
+        if (typeof window.updateAllMinerInfoFirst === 'function') {
+            await window.updateAllMinerInfoFirst();
+        }
+    } else if (tabName == "stats-graphs") {
         await initEthers2();
         updateGraphData(30, 30);
     }
