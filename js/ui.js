@@ -1086,7 +1086,7 @@ export function updateTokenIconCore(selectId, iconId, options = {}) {
  * @param {string} iconId - Icon element ID
  */
 export function updateTokenIcon(selectId, iconId) {
-    updateTokenIconCore(selectId, iconId, { context: 'swap' });
+    updateTokenIconCore(selectId, iconId, { context: 'swap', clearAmount: false });
 }
 
 /**

@@ -1934,12 +1934,36 @@ function handleAmountChange() {
 }
 
 /**
- * Initialize amount input event listeners when DOM is ready
+ * Handle token select change - refetch estimate when token changes
+ * Uses shared debounce timer so if both fromToken and toToken change together,
+ * only one getEstimate call is made
+ */
+function handleTokenChange() {
+    const amountInput = document.querySelector('#swap .form-group:nth-child(5) input');
+    const amount = parseFloat(amountInput?.value) || 0;
+    console.log("Token changed, amount:", amount);
+
+    // Clear the previous timer (shared with amount changes)
+    clearTimeout(debounceTimerSwap);
+
+    // Only call getEstimate if amount > 0
+    if (amount > 0) {
+        // 1 second delay ensures if both tokens change together, only one call is made
+        debounceTimerSwap = setTimeout(() => {
+            getEstimate();
+        }, 1000);
+    }
+}
+
+/**
+ * Initialize amount input and token select event listeners when DOM is ready
  */
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Swaps.js: Setting up amount input event listeners...');
+    console.log('Swaps.js: Setting up swap input event listeners...');
 
     const amountInput = document.querySelector('#swap .form-group:nth-child(5) input');
+    const fromSelect = document.querySelector('#swap .form-group:nth-child(4) select');
+    const toSelect = document.querySelector('#swap .form-group:nth-child(7) select');
 
     if (amountInput) {
         console.log('Swaps.js: Amount input found, attaching listeners');
@@ -1948,6 +1972,20 @@ document.addEventListener('DOMContentLoaded', function() {
         amountInput.addEventListener('change', handleAmountChange);
     } else {
         console.error('Swaps.js: Amount input not found with selector: #swap .form-group:nth-child(5) input');
+    }
+
+    if (fromSelect) {
+        console.log('Swaps.js: From token select found, attaching listener');
+        fromSelect.addEventListener('change', handleTokenChange);
+    } else {
+        console.error('Swaps.js: From token select not found');
+    }
+
+    if (toSelect) {
+        console.log('Swaps.js: To token select found, attaching listener');
+        toSelect.addEventListener('change', handleTokenChange);
+    } else {
+        console.error('Swaps.js: To token select not found');
     }
 });
 
