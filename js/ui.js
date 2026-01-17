@@ -488,6 +488,19 @@ export async function switchTab(tabName) {
 
             await switchToBase();
         }
+
+        // Preload position data in background for any tab (with cache check)
+        if (!window.positionsLoaded && typeof window.getTokenIDsOwnedByMetamask === 'function') {
+            window.positionsLoaded = true;
+            window.positionsLoadPromise = window.getTokenIDsOwnedByMetamask().then(() => {
+                if (typeof window.loadPositionsIntoDappSelections === 'function') {
+                    return window.loadPositionsIntoDappSelections();
+                }
+            }).catch(e => {
+                console.warn('Failed to preload positions:', e);
+                window.positionsLoaded = false; // Allow retry on failure
+            });
+        }
     }
 
     // Hide all pages
@@ -557,8 +570,9 @@ export async function switchTab(tabName) {
             if (typeof window.getRewardStats === 'function') {
                 await window.getRewardStats();
             }
-            if (typeof window.getTokenIDsOwnedByMetamask === 'function') {
-                await window.getTokenIDsOwnedByMetamask();
+            // Wait for preloaded positions if needed
+            if (window.positionsLoadPromise) {
+                await window.positionsLoadPromise;
             }
         }
         if (typeof window.updateStakingStats === 'function') {
@@ -587,11 +601,9 @@ export async function switchTab(tabName) {
                     );
                 }
             }
-            if (typeof window.getTokenIDsOwnedByMetamask === 'function') {
-                await window.getTokenIDsOwnedByMetamask();
-            }
-            if (typeof window.loadPositionsIntoDappSelections === 'function') {
-                await window.loadPositionsIntoDappSelections();
+            // Wait for preloaded positions
+            if (window.positionsLoadPromise) {
+                await window.positionsLoadPromise;
             }
             // Update the position info displays
             if (tabName === 'stake-increase' && typeof window.updateStakePositionInfo === 'function') {
@@ -602,20 +614,14 @@ export async function switchTab(tabName) {
             }
         }
     } else if (tabName === 'liquidity-positions') {
-        // Load position data when switching to positions tab
-        if (window.walletConnected && typeof window.getTokenIDsOwnedByMetamask === 'function') {
-            await window.getTokenIDsOwnedByMetamask();
-        }
-        if (typeof window.loadPositionsIntoDappSelections === 'function') {
-            await window.loadPositionsIntoDappSelections();
+        // Wait for preloaded positions
+        if (window.walletConnected && window.positionsLoadPromise) {
+            await window.positionsLoadPromise;
         }
     } else if (tabName === 'create' || tabName === 'increase' || tabName === 'decrease') {
-        // Load position data when switching to create/increase/decrease tabs
-        if (window.walletConnected && typeof window.getTokenIDsOwnedByMetamask === 'function') {
-            await window.getTokenIDsOwnedByMetamask();
-        }
-        if (typeof window.loadPositionsIntoDappSelections === 'function') {
-            await window.loadPositionsIntoDappSelections();
+        // Wait for preloaded positions
+        if (window.walletConnected && window.positionsLoadPromise) {
+            await window.positionsLoadPromise;
         }
     } else if (tabName === 'side-pools') {
         // Load pool fees data
@@ -667,13 +673,10 @@ export async function switchTab(tabName) {
                     }
                 }
             }
-            // Load positions for increase/decrease liquidity
+            // Wait for preloaded positions for increase/decrease liquidity
             if (tabName === 'increase-liquidity' || tabName === 'decrease-liquidity') {
-                if (typeof window.getTokenIDsOwnedByMetamask === 'function') {
-                    await window.getTokenIDsOwnedByMetamask();
-                }
-                if (typeof window.loadPositionsIntoDappSelections === 'function') {
-                    await window.loadPositionsIntoDappSelections();
+                if (window.positionsLoadPromise) {
+                    await window.positionsLoadPromise;
                 }
             }
         }
