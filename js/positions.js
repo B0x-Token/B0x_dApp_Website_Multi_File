@@ -71,7 +71,7 @@ let tokenAddress = tokenAddresses["B0x"];
 let Address_ZEROXBTC_TESTNETCONTRACT = tokenAddresses["0xBTC"];
 let HookAddress = hookAddress;
 let permit2Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-let Current_getsqrtPricex96 = toBigNumber(0);
+//let Current_getsqrtPricex96 = toBigNumber(0);
 let nftOwners = {};
 // APYFINAL is now stored on window object (set in staking.js)
 let WhereToStartSearch = 0;
@@ -159,7 +159,7 @@ export function showPositionsLoadingState() {
     }
 
     // Update staking main page - deposit NFT selector
-    const stakingMainSelect = document.querySelector('#staking-main-page select');
+    const stakingMainSelect = document.querySelector('#staking-deposit-select');
     if (stakingMainSelect) {
         stakingMainSelect.innerHTML = `<option value="">${loadingMessage}</option>`;
     }
@@ -208,29 +208,43 @@ function triggerRefresh() {
 }
 
 /**
+ * Helper function for 24-bit sign extension
+ * @param {number} value - Value to sign extend
+ * @returns {number} Sign extended value
+ */
+function signExtend24Bit(value) {
+    const SIGN_BIT = 0x800000; // Bit 23 for 24-bit numbers
+    const MASK_24BIT = 0xFFFFFF;
+
+    if (value & SIGN_BIT) {
+        // Negative number - extend with 1s
+        return (value | (~MASK_24BIT)) | 0; // | 0 converts to 32-bit signed int
+    } else {
+        // Positive number
+        return value;
+    }
+}
+
+/**
  * Calculate tick lower from packed position info
- * @param {string} packedInfo - Packed position information
+ * @param {string} info - Packed position information
  * @returns {number} Tick lower value
  */
-function TOtickLower(packedInfo) {
-    const bigIntValue = BigInt(packedInfo);
-    const mask = BigInt("0xFFFFFF");
-    let tickLower = Number((bigIntValue >> BigInt(232)) & mask);
-    if (tickLower > 0x800000) tickLower -= 0x1000000;
-    return tickLower;
+function TOtickLower(info) {
+    const TICK_LOWER_OFFSET = 8;
+    const shifted = Number((BigInt(info) >> BigInt(TICK_LOWER_OFFSET)) & 0xFFFFFFn);
+    return signExtend24Bit(shifted);
 }
 
 /**
  * Calculate tick upper from packed position info
- * @param {string} packedInfo - Packed position information
+ * @param {string} info - Packed position information
  * @returns {number} Tick upper value
  */
-function TOtickUpper(packedInfo) {
-    const bigIntValue = BigInt(packedInfo);
-    const mask = BigInt("0xFFFFFF");
-    let tickUpper = Number((bigIntValue >> BigInt(208)) & mask);
-    if (tickUpper > 0x800000) tickUpper -= 0x1000000;
-    return tickUpper;
+function TOtickUpper(info) {
+    const TICK_UPPER_OFFSET = 32;
+    const shifted = Number((BigInt(info) >> BigInt(TICK_UPPER_OFFSET)) & 0xFFFFFFn);
+    return signExtend24Bit(shifted);
 }
 
 /**
@@ -954,6 +968,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
             const formattedToken2FEESOWED = ethers.utils.formatUnits(feesOwedToken2[i], decimalsTokenB);
 
             // Only include full-range positions
+            console.log(`Position ${tokenId}: tickLower=${decodedInfo.tickLower}, tickUpper=${decodedInfo.tickUpper}, isFullRange=${decodedInfo.tickUpper == 887220 && decodedInfo.tickLower == -887220}`);
             if (decodedInfo.tickUpper == 887220 && decodedInfo.tickLower == -887220) {
                 positionData[idNameID] = {
                     id: idNameID,
@@ -1177,8 +1192,8 @@ export async function increaseLiquidity() {
     let liquidityDelta = 0;
 
     try {
-        const afterFees0 = amount0 - fees0a;
-        const afterFees1 = amount1 - fees1a;
+        const afterFees0 = amount0.sub(fees0a);
+        const afterFees1 = amount1.sub(fees1a);
 
         await approveIfNeeded(token0, permit2Address, afterFees0);
         await approveIfNeeded(token1, permit2Address, afterFees1);
@@ -1191,7 +1206,7 @@ export async function increaseLiquidity() {
 
         const sqrtRatioAX96 = getSqrtRatioAtTick(tickLower);
         const sqrtRatioBX96 = getSqrtRatioAtTick(tickUpper);
-        const sqrtPricex96 = Current_getsqrtPricex96;
+        const sqrtPricex96 = window.Current_getsqrtPricex96;
 
         const result = await tokenSwapperContract.getLiquidityForAmounts(sqrtPricex96, sqrtRatioAX96, sqrtRatioBX96, amount0, amount1);
         liquidityDelta = result;
@@ -1552,6 +1567,46 @@ export function updatePositionInfo() {
 }
 
 /**
+ * Updates the staking deposit position info display
+ * Shows position details in the staking main page info-card2
+ * @returns {void}
+ */
+export function updateStakingDepositPositionInfo() {
+    const positionSelect = document.querySelector('#staking-deposit-select');
+    const infoCard = document.getElementById('staking-position-info');
+
+    if (!positionSelect || !infoCard) {
+        console.log('updateStakingDepositPositionInfo: Elements not found');
+        return;
+    }
+
+    const selectedPositionId = positionSelect.value;
+    const position = positionData[selectedPositionId];
+
+    if (!position) {
+        // No position selected or no positions available
+        if (isInitialPositionLoad) {
+            console.log('updateStakingDepositPositionInfo: Initial load, keeping message');
+            return;
+        }
+
+        infoCard.innerHTML = `
+            <h3>NFT Position Info</h3>
+            <p>Please Create a Position in order to Deposit the Uniswap v4 NFT into staking</p>
+        `;
+        return;
+    }
+
+    // Display position info (no icons for staking deposit selector)
+    infoCard.innerHTML = `
+        <h3>NFT Position Info</h3>
+        <p><strong>Position ID:</strong> #${position.id.split('_')[1]}</p>
+        <p><strong>Pool:</strong> ${position.tokenA} / ${position.tokenB} (${position.feeTier})</p>
+        <p><strong>Token Amounts:</strong> ${parseFloat(position.currentTokenA).toFixed(6)} ${position.tokenA} & ${parseFloat(position.currentTokenB).toFixed(8)} ${position.tokenB}</p>
+    `;
+}
+
+/**
  * Updates total liquidity increase display
  * @returns {void}
  */
@@ -1857,7 +1912,7 @@ export async function loadPositionsIntoDappSelections() {
     // ========================================
 
     // Staking main page - deposit NFT selector (uses positionData)
-    const stakingMainPageSelect = document.querySelector('#staking-main-page select');
+    const stakingMainPageSelect = document.querySelector('#staking-deposit-select');
     if (stakingMainPageSelect) {
         const currentStakingValue = stakingMainPageSelect.value;
         // Only clear select if we have data OR initial load is complete
@@ -1877,6 +1932,9 @@ export async function loadPositionsIntoDappSelections() {
             if (currentStakingValue && stakingMainPageSelect.querySelector(`option[value="${currentStakingValue}"]`)) {
                 stakingMainPageSelect.value = currentStakingValue;
             }
+
+            // Update the position info display
+            updateStakingDepositPositionInfo();
         }
     }
 
@@ -2008,7 +2066,7 @@ export async function loadPositionsIntoDappSelections() {
 
         // Clear selects that still have loading message (when no data)
         if (Object.keys(positionData).length === 0) {
-            const selectors = ['#increase select', '#decrease select', '#staking-main-page select'];
+            const selectors = ['#increase select', '#decrease select', '#staking-deposit-select'];
             selectors.forEach(sel => {
                 const el = document.querySelector(sel);
                 if (el) el.innerHTML = '';

@@ -304,6 +304,43 @@ export function showInfoNotificationCentered(msg = 'Processing...', msg2 = 'Plea
 }
 
 /**
+ * Shows success notification at top of screen (for buttons near top of page like claim rewards)
+ * @param {string} msg - Main message
+ * @param {string} msg2 - Secondary message
+ * @param {string} txHash - Transaction hash for explorer link
+ * @param {string} network - Network for explorer link ('base' or 'ethereum')
+ * @returns {string} Notification ID
+ */
+export function showSuccessNotificationTop(msg = 'Success!', msg2 = '', txHash = null, network = 'base') {
+    const widget = getNotificationWidget();
+    widget.setPosition('top-right');
+
+    let enhancedMessage = msg2;
+    if (txHash) {
+        const explorerUrl = network === 'ethereum'
+            ? `https://etherscan.io/tx/${txHash}`
+            : `https://basescan.org/tx/${txHash}`;
+        enhancedMessage = `${msg2} <br><a href="${explorerUrl}" target="_blank" style="color: #10b981; text-decoration: underline; font-weight: 600;">View on Explorer →</a>`;
+    }
+
+    const notificationId = widget.show('success', msg, enhancedMessage, 30000);
+
+    // Make the notification larger like other success notifications with txHash
+    if (txHash) {
+        setTimeout(() => {
+            const notification = document.querySelector(`[data-id="${notificationId}"]`);
+            if (notification) {
+                notification.style.transform = 'scale(1.7)';
+                notification.style.zIndex = '10001';
+                notification.style.transformOrigin = 'top right';
+            }
+        }, 50);
+    }
+
+    return notificationId;
+}
+
+/**
  * Shows toast notification
  * @param {string} message - Message to display
  * @param {boolean} isError - Whether it's an error toast
@@ -566,6 +603,14 @@ export async function switchTab(tabName) {
         }
     } else if (tabName === 'liquidity-positions') {
         // Load position data when switching to positions tab
+        if (window.walletConnected && typeof window.getTokenIDsOwnedByMetamask === 'function') {
+            await window.getTokenIDsOwnedByMetamask();
+        }
+        if (typeof window.loadPositionsIntoDappSelections === 'function') {
+            await window.loadPositionsIntoDappSelections();
+        }
+    } else if (tabName === 'create' || tabName === 'increase' || tabName === 'decrease') {
+        // Load position data when switching to create/increase/decrease tabs
         if (window.walletConnected && typeof window.getTokenIDsOwnedByMetamask === 'function') {
             await window.getTokenIDsOwnedByMetamask();
         }
@@ -1342,7 +1387,7 @@ export function filterTokenOptionsSwapETH() {
  * Updates position info for main staking page
  */
 export function updatePositionInfoMAIN_STAKING() {
-    const positionSelect = document.querySelector('#staking-main-page select');
+    const positionSelect = document.querySelector('#staking-deposit-select');
     const selectedPositionId = positionSelect.value;
     const position = positionData[selectedPositionId];
 
@@ -1738,7 +1783,7 @@ export function formatTime(seconds) {
  * Updates position dropdown for staking
  */
 export function updatePositionDropdown() {
-    const positionSelect2 = document.querySelector('#staking-main-page select');
+    const positionSelect2 = document.querySelector('#staking-deposit-select');
     if (!positionSelect2) return;
 
    // functionCallCounter++;
@@ -2227,10 +2272,11 @@ export function initRichListEventListeners() {
  */
 function adjustTableForScreenSize() {
     const activeTab = document.querySelector('.nav-tab2.active');
-    const activeTab2 = activeTab?.getAttribute('data-tab');
-    console.log("active Tab: ", activeTab?.getAttribute('data-tab'));
+    if (!activeTab) return; // Exit silently if no active tab
 
-    if (activeTab && activeTab2 == 'stats-staking-rich-list') {
+    const activeTab2 = activeTab.getAttribute('data-tab');
+
+    if (activeTab2 == 'stats-staking-rich-list') {
         const table = document.querySelector('#tableContent55 table');
         if (!table) return;
 
@@ -2312,8 +2358,9 @@ window.addEventListener('resize', adjustTableForScreenSize);
  */
 function fixsize() {
     const activeTab = document.querySelector('.nav-tab2.active');
+    if (!activeTab) return; // Exit silently if no active tab
 
-    if (activeTab && (activeTab.textContent.trim().includes('Rich List') || activeTab.id === 'stats-rich-list' || activeTab.classList.contains('stats-rich-list'))) {
+    if (activeTab.textContent.trim().includes('Rich List') || activeTab.id === 'stats-rich-list' || activeTab.classList.contains('stats-rich-list')) {
         console.log('Active tab:', activeTab.textContent.trim());
 
         setTimeout(() => {
@@ -2519,12 +2566,6 @@ function fixsize() {
                 console.log("All tables:", document.querySelectorAll('table'));
             }
         }, 100);
-
-    } else {
-        console.log("Not in rich-list tab");
-        if (activeTab) {
-            console.log("Current tab:", activeTab.textContent.trim());
-        }
     }
 }
 
@@ -3917,6 +3958,7 @@ export default {
     // Notifications
     hideNotification,
     showSuccessNotification,
+    showSuccessNotificationTop,
     showErrorNotification,
     showWarningNotification,
     showInfoNotification,

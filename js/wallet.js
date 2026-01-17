@@ -843,7 +843,7 @@ export async function setupWalletListeners() {
             // Load positions into UI
             if (window.loadPositionsIntoDappSelections) {
                 try {
-                    await window.loadPositionsIntoDappSelections();
+                   // await window.loadPositionsIntoDappSelections();
                 } catch (e) {
                     console.warn('Failed to load positions on account change:', e);
                 }
@@ -970,7 +970,7 @@ export async function connect2() {
     const selectors = [
         '#increase select',
         '#decrease select',
-        '#staking-main-page select',
+        '#staking-deposit-select',
         '#staking-main-page .form-group2 select',
         '#stake-increase select'
     ];

@@ -217,6 +217,48 @@ export async function checkAllowance2(permit2Contract, userAddress, tokenAddress
 }
 
 /**
+ * Approve token if needed (with USDC support)
+ * @async
+ * @param {string} tokenToApprove - Token address to approve
+ * @param {string} spenderAddress - Spender contract address
+ * @param {number|string} requiredAmount - Required approval amount
+ * @returns {Promise<boolean|Object>} True if already approved, or transaction receipt
+ */
+export async function approveIfNeededUSDC(tokenToApprove, spenderAddress, requiredAmount) {
+    try {
+        const allowanceSufficient = await checkAllowance(tokenToApprove, spenderAddress, requiredAmount);
+
+        if (allowanceSufficient) {
+            console.log("Approval not needed - sufficient allowance exists");
+            return true;
+        }
+
+        showInfoNotification('Approve Token', 'Requesting approval for unlimited amount to avoid future approvals...');
+        const txResponse = await approveToken(tokenToApprove, spenderAddress, requiredAmount);
+
+        let txReceipt;
+        if (txResponse.wait) {
+            txReceipt = await txResponse.wait();
+        } else {
+            txReceipt = txResponse;
+        }
+
+        showSuccessNotification(
+            'Approved Tokens!',
+            'Tokens have been approved on the contract successfully',
+            txReceipt.transactionHash
+        );
+
+        return txReceipt;
+
+    } catch (error) {
+        console.error("Approve if needed failed:", error);
+        alert(`Approval process failed: ${error.message}`);
+        return false;
+    }
+}
+
+/**
  * Checks if token approval is needed for Permit2
  * @async
  * @param {ethers.Contract} permit2Contract - Permit2 contract instance

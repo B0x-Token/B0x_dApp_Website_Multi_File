@@ -237,9 +237,10 @@ export async function runReloadFunctions(fromChecker = false, fromReset = true) 
 
         const now = new Date().toLocaleTimeString();
         console.log("Reload completed at:", now);
+  await new Promise(resolve => setTimeout(resolve, 400));
 
         // Get APY if from checker
-        if (fromChecker && window.GetRewardAPY) {
+        if (window.GetRewardAPY) {
             await window.GetRewardAPY();
         }
 

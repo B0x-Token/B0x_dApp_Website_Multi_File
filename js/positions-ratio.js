@@ -824,27 +824,26 @@ async function handleMaxButtonClick(tokenSymbol, inputElement) {
     if (!result.requestFulfilled) {
         console.log(`Max ${tokenSymbol} request could not be fulfilled: ${result.reason}`);
         console.log(`Using max amounts based on actual limiting factor: ${result.actualLimitingFactor}`);
-
-        const createInputs = document.querySelectorAll('#increase input[type="number"]');
-        const amountInputA = createInputs[0];
-        const amountInputB = createInputs[1];
-
-        const tokenAinputAddress = tokenAddresses[tokenAValue];
-
-        if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
-            amountInputA.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
-            amountInputB.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
-        } else {
-            amountInputA.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
-            amountInputB.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
-        }
-
-        updateTotalLiqIncrease();
-        return result;
+    } else {
+        console.log(`Max ${tokenSymbol} request fulfilled successfully`);
     }
 
-    console.error('getMaxAmountsWithProperLimiting function not available');
-    return null;
+    const createInputs = document.querySelectorAll('#increase input[type="number"]');
+    const amountInputA = createInputs[0];
+    const amountInputB = createInputs[1];
+
+    const tokenAinputAddress = tokenAddresses[tokenAValue];
+
+    if (tokenAinputAddress === Address_ZEROXBTC_TESTNETCONTRACT) {
+        amountInputA.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
+        amountInputB.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
+    } else {
+        amountInputA.value = ethers.utils.formatUnits(result.amountToDeposit, 18);
+        amountInputB.value = ethers.utils.formatUnits(result.amountWith8Decimals0xBTC, 8);
+    }
+
+    updateTotalLiqIncrease();
+    return result;
 }
 
 /**

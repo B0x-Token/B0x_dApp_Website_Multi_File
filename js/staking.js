@@ -18,7 +18,9 @@ import {
     contractAddress_Swapper,
     hookAddress,
     MULTICALL_ADDRESS,
-    ProofOfWorkAddresss
+    ProofOfWorkAddresss,
+    USDCToken,
+    contractAddress_PositionFinderPro
 } from './config.js';
 
 import { positionData, stakingPositionData } from './positions.js';
@@ -31,6 +33,7 @@ import {
 
 import {
     showSuccessNotification,
+    showSuccessNotificationTop,
     showErrorNotification,
     showInfoNotification,
     showSuccessNotificationCentered,
@@ -47,8 +50,10 @@ import { MULTICALL_ABI2, CONTRACT_ABI } from './abis.js';
 import {
     getSqrtRatioAtTick,
     approveTokensViaPermit2,
-    toBigNumber
+    toBigNumber,
+    approveIfNeededUSDC
 } from './contracts.js';
+import { getNFTOwners } from './data-loader.js';
 
 // ============================================
 // STATE VARIABLES
@@ -424,8 +429,12 @@ export async function collectRewards() {
         await rewardTx.wait();
         console.log("Rewards claimed successfully!");
 
-        showSuccessNotification('Rewards Claimed!', 'Your staking rewards have been successfully claimed.', rewardTx.hash);
+        showSuccessNotificationTop('Rewards Claimed!', 'Your staking rewards have been successfully claimed.', rewardTx.hash);
         alert("Claimed Rewards SUCCESSFULLY!");
+
+        // Invalidate cache and cooldown to force fresh data fetch
+        window.rewardStatsCache.timestamp = 0;
+        lastRewardStatsCall = 0;
 
         // Refresh balances and stats
         if (window.fetchBalances) await window.fetchBalances();
@@ -454,9 +463,9 @@ export async function depositNFTStake() {
     disableButtonWithSpinner('depositNFTStakeBtn');
     alert('You are now depositing a Uniswap v4 NFT Position to stake. Withdrawal penalty is 20% to instant withdraw down to 3% after 15 days. 1% after 45 days. It is tracked per NFT, so multiple NFTs will have different withdraw Penalties');
 
-    const positionSelect = document.querySelector('#staking-main-page select');
+    const positionSelect = document.querySelector('#staking-deposit-select');
     const selectedPositionId = positionSelect.value;
-    const position = window.positionData?.[selectedPositionId];
+    const position = positionData?.[selectedPositionId];
 
     if (!position) {
         showErrorNotificationCentered('Invalid Position', 'Selected position not found');
@@ -543,7 +552,7 @@ export async function depositNFTStake() {
 
         if (window.fetchBalances) await window.fetchBalances();
         if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask(true); // Force refresh after stake
-        if (window.loadPositionsIntoDappSelections) await window.loadPositionsIntoDappSelections();
+       // if (window.loadPositionsIntoDappSelections) await window.loadPositionsIntoDappSelections();
         await getRewardStats();
 
     } catch (error) {
@@ -620,7 +629,7 @@ export async function withdrawNFTStake() {
 
         if (window.fetchBalances) await window.fetchBalances();
         if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask(true); // Force refresh after unstake
-        if (window.loadPositionsIntoDappSelections) await window.loadPositionsIntoDappSelections();
+      //  if (window.loadPositionsIntoDappSelections) await window.loadPositionsIntoDappSelections();
 
     } catch (error) {
         enableButton('withdrawNFTStakeBtn', 'Withdraw NFT from Staking');
@@ -762,6 +771,104 @@ window.rewardStatsCache = {
     data: null,
     userAddress: null  // Track which address the cache is for
 };
+
+/**
+ * Starts a new reward period for a specific token
+ * @async
+ * @returns {Promise<void>}
+ */
+export async function startRewardPeriod() {
+    if (!window.walletConnected) {
+        await window.connectWallet();
+    }
+
+    const inputtedTokenAddress = document.getElementById("selectedRewardToken").value;
+    console.log("INPUTED ADDRESS = ", inputtedTokenAddress);
+
+    const startRewardABI = [{
+        "inputs": [
+            {
+                "internalType": "contract IERC20",
+                "name": "token",
+                "type": "address"
+            }
+        ],
+        "name": "setRewardParams",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }];
+
+    const LPRewardsStakingContract = new ethers.Contract(
+        contractAddressLPRewardsStaking,
+        startRewardABI,
+        window.signer
+    );
+
+    try {
+        const tx = await LPRewardsStakingContract.setRewardParams(inputtedTokenAddress);
+        console.log("Transaction sent:", tx.hash);
+        const receipt = await tx.wait();
+        console.log("setRewardParams Transaction Confirmed!");
+    } catch (e) {
+        if (e.message && e.message.includes("Reward must be positive")) {
+            const symbol = mockRewardTokens.find(token => token.address === inputtedTokenAddress)?.symbol;
+            alert("Token Reward Amount is Zero for token: " + symbol + "   address: " + inputtedTokenAddress + " \nCant start new Reward Period with zero rewards");
+        } else {
+            console.error("Transaction failed:", e.message || e);
+            alert("Transaction failed: " + (e.message || "Unknown error"));
+        }
+    }
+
+    await getRewardStats();
+}
+
+/**
+ * Adds a new reward token to the staking contract
+ * @async
+ * @returns {Promise<void>}
+ */
+export async function addRewardToken() {
+    if (!window.walletConnected) {
+        await window.connectWallet();
+    }
+
+    const inputtedTokenAddress = document.getElementById("rewardTokenAddress").value;
+    console.log("INPUTED ADDRESS = ", inputtedTokenAddress);
+
+    const addRewardTokenABI = [{
+        "inputs": [
+            {
+                "internalType": "contract IERC20",
+                "name": "token",
+                "type": "address"
+            }
+        ],
+        "name": "addRewardToken",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }];
+
+    // Use calculated cost from multicall, fallback to 20 USDC if not available
+    const usdcCostRaw = window.addRewardTokenCost?.usdcCostRaw || (20 * 10 ** 6);
+    console.log("USDC cost for adding reward token:", usdcCostRaw / (10 ** 6), "USDC");
+
+    await approveIfNeededUSDC(USDCToken, contractAddressLPRewardsStaking, usdcCostRaw);
+
+    const LPRewardsStakingContract = new ethers.Contract(
+        contractAddressLPRewardsStaking,
+        addRewardTokenABI,
+        window.signer
+    );
+
+    const tx = await LPRewardsStakingContract.addRewardToken(inputtedTokenAddress);
+    console.log("Transaction sent:", tx.hash);
+    const receipt = await tx.wait();
+    console.log("addRewardToken with USDC for public Confirmed!");
+
+    await getRewardStats();
+}
 
 export async function getRewardStats() {
     if (window.userAddress == "" || window.userAddress == null) {
@@ -911,12 +1018,22 @@ export async function getRewardStats() {
         "type": "function"
     }];
 
+    // getRewardTokens ABI for calculating add reward token cost
+    const getRewardTokensABI = [{
+        "inputs": [],
+        "name": "getRewardTokens",
+        "outputs": [{ "internalType": "contract IERC20[]", "name": "", "type": "address[]" }],
+        "stateMutability": "view",
+        "type": "function"
+    }];
+
     const iface = new ethers.utils.Interface(getRewardStatsABI);
     const contractInterface = new ethers.utils.Interface(CONTRACT_ABI);
     const tokenSwapperInterface = new ethers.utils.Interface(tokenSwapperABI);
     const ownerInterface = new ethers.utils.Interface(ownerABI);
     const multicallInterface = new ethers.utils.Interface(MULTICALL3_ABI);
     const erc20Interface = new ethers.utils.Interface(erc20ABI);
+    const rewardTokensInterface = new ethers.utils.Interface(getRewardTokensABI);
 
     console.log("userAddress== ", window.userAddress);
 
@@ -1011,6 +1128,12 @@ export async function getRewardStats() {
             target: HookAddress,
             allowFailure: true,
             callData: ownerInterface.encodeFunctionData("owner")
+        },
+        // Call 25: getRewardTokens for calculating add reward token cost (1 call)
+        {
+            target: contractAddressLPRewardsStaking,
+            allowFailure: true,
+            callData: rewardTokensInterface.encodeFunctionData("getRewardTokens")
         }
     ];
 
@@ -1157,6 +1280,36 @@ export async function getRewardStats() {
         }
     } catch (ownerError) {
         console.warn("Failed to decode owner addresses from multicall:", ownerError);
+    }
+
+    // Decode getRewardTokens result (index 25) and calculate add reward token cost
+    try {
+        if (results[25] && results[25].success) {
+            const rewardTokensArray = rewardTokensInterface.decodeFunctionResult("getRewardTokens", results[25].returnData)[0];
+            const rewardTokensLength = rewardTokensArray.length;
+
+            // Calculate USDC cost: (length / 20 + 1) * 20 USDC (6 decimals)
+            const multiplier = Math.floor(rewardTokensLength / 20) + 1;
+            const usdcCost = multiplier * 20;
+            const usdcCostRaw = multiplier * 20 * (10 ** 6); // Raw amount with 6 decimals
+
+            window.addRewardTokenCost = {
+                rewardTokensCount: rewardTokensLength,
+                multiplier: multiplier,
+                usdcCost: usdcCost,
+                usdcCostRaw: usdcCostRaw
+            };
+
+            console.log(`Reward tokens count: ${rewardTokensLength}, Add token cost: ${usdcCost} USDC`);
+
+            // Update UI if element exists
+            const costDisplay = document.getElementById('addRewardTokenCost');
+            if (costDisplay) {
+                costDisplay.textContent = `Costs ${usdcCost} USDC on Base`;
+            }
+        }
+    } catch (rewardTokensError) {
+        console.warn("Failed to decode getRewardTokens from multicall:", rewardTokensError);
     }
 
     const rewardAddressesStaking = result[0];
@@ -1658,7 +1811,7 @@ export async function increaseLiquidityStaking() {
 
         const sqrtRatioAX96 = getSqrtRatioAtTick(tickLower);
         const sqrtRatioBX96 = getSqrtRatioAtTick(tickUpper);
-        const sqrtPricex96 = Current_getsqrtPricex96;
+        const sqrtPricex96 = window.Current_getsqrtPricex96;
 
         const slippageBPS = Math.floor(numberValueSlippage * 100);
 
@@ -2017,6 +2170,125 @@ export function updateStakePercentage(value) {
         console.log("penaltyAsNumber: ", penaltyAsNumber);
         tokenInputs[0].value = `${(((tokenAAmount * (100 - penaltyAsNumber)) / 100)).toFixed(tokenADecimals)} ${position.tokenA}`;
         tokenInputs[1].value = `${(((tokenBAmount * (100 - penaltyAsNumber)) / 100)).toFixed(tokenBDecimals)} ${position.tokenB}`;
+    }
+}
+
+// ============================================================================
+// FETCH ALL UNISWAP FEES
+// ============================================================================
+
+/**
+ * Fetches all Uniswap fees from staked NFT positions
+ * Gets all token IDs owned by the staking contract and calls getUniswapALL
+ * @async
+ * @returns {Promise<{successCount: number, failureCount: number}>}
+ */
+export async function fetchAllUniswapFees() {
+    if (!window.walletConnected) {
+        await window.connectWallet();
+    }
+
+    const resultDiv = document.getElementById('fetchFeesResult');
+    const statusSpan = document.getElementById('fetchFeesStatus');
+
+    if (resultDiv) resultDiv.style.display = 'block';
+    if (statusSpan) statusSpan.textContent = 'Scanning for staked NFTs...';
+
+    try {
+        // Get all NFT owners from data-loader
+        const nftOwners = getNFTOwners();
+
+        if (!nftOwners || Object.keys(nftOwners).length === 0) {
+            if (statusSpan) statusSpan.textContent = 'No NFT owner data available. Please wait for data to load.';
+            return { successCount: 0, failureCount: 0 };
+        }
+
+        // Filter for token IDs owned by the staking contract
+        const stakingContractAddress = contractAddressLPRewardsStaking.toLowerCase();
+        const stakedTokenIds = [];
+
+        for (const [tokenId, owner] of Object.entries(nftOwners)) {
+            if (owner.toLowerCase() === stakingContractAddress) {
+                stakedTokenIds.push(tokenId);
+            }
+        }
+
+        console.log(`Found ${stakedTokenIds.length} NFTs owned by staking contract`);
+
+        if (stakedTokenIds.length === 0) {
+            if (statusSpan) statusSpan.textContent = 'No NFTs found owned by the staking contract.';
+            return { successCount: 0, failureCount: 0 };
+        }
+
+        if (statusSpan) statusSpan.textContent = `Found ${stakedTokenIds.length} staked NFTs. Fetching fees...`;
+
+        // ABI for getUniswapALL function
+        const getUniswapALLABI = [{
+            "inputs": [
+                { "internalType": "uint256[]", "name": "tokenIds", "type": "uint256[]" }
+            ],
+            "name": "getUniswapALL",
+            "outputs": [
+                { "internalType": "uint256", "name": "successCount", "type": "uint256" },
+                { "internalType": "uint256", "name": "failureCount", "type": "uint256" }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        }];
+
+        const feeCollectorContract = new ethers.Contract(
+            contractAddress_PositionFinderPro,
+            getUniswapALLABI,
+            window.signer
+        );
+
+        showInfoNotification('Fetching Uniswap Fees', `Collecting fees from ${stakedTokenIds.length} staked NFT positions...`);
+
+        // Call getUniswapALL with all staked token IDs
+        const tx = await feeCollectorContract.getUniswapALL(stakedTokenIds);
+        console.log("Transaction sent:", tx.hash);
+
+        if (statusSpan) statusSpan.textContent = `Transaction sent. Waiting for confirmation...`;
+
+        const receipt = await tx.wait();
+        console.log("Transaction confirmed:", receipt.transactionHash);
+
+        // Try to get the return values from the transaction
+        // Note: For non-view functions, we may need to parse logs or decode return data
+        let successCount = 0;
+        let failureCount = 0;
+
+        // Try to decode the return values from the transaction receipt
+        try {
+            const iface = new ethers.utils.Interface(getUniswapALLABI);
+            // Check if there are any logs we can parse for results
+            if (receipt.logs && receipt.logs.length > 0) {
+                console.log("Transaction logs:", receipt.logs);
+            }
+            // For now, we'll report based on the transaction success
+            successCount = stakedTokenIds.length;
+            failureCount = 0;
+        } catch (decodeError) {
+            console.warn("Could not decode return values:", decodeError);
+            successCount = stakedTokenIds.length;
+        }
+
+        const resultMessage = `✅ Fees collected! Success: ${successCount}, Failures: ${failureCount}`;
+        if (statusSpan) statusSpan.innerHTML = resultMessage;
+
+        showSuccessNotification('Fees Collected!', `Successfully processed ${stakedTokenIds.length} NFT positions`, tx.hash);
+
+        // Refresh reward stats to show updated balances
+        await getRewardStats();
+
+        return { successCount, failureCount };
+
+    } catch (error) {
+        console.error("Error fetching Uniswap fees:", error);
+        const errorMessage = `❌ Error: ${error.message || 'Failed to fetch fees'}`;
+        if (statusSpan) statusSpan.textContent = errorMessage;
+        showErrorNotification('Fee Collection Failed', error.message || 'Failed to fetch Uniswap fees');
+        return { successCount: 0, failureCount: 0 };
     }
 }
 

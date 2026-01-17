@@ -834,7 +834,7 @@ export function loadSettings() {
  * @returns {void}
  */
 export function setupUserSelectionTracking() {
-    const positionSelect = document.querySelector('#staking-main-page select');
+    const positionSelect = document.querySelector('#staking-deposit-select');
     if (positionSelect && !positionSelect.hasAttribute('data-user-tracker')) {
         positionSelect.addEventListener('change', function (e) {
             console.log('Change event details:', {

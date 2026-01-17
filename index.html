@@ -47,6 +47,45 @@
 
     </head>
 <body>
+    <!-- IPFS Verification Banner -->
+    <div id="ipfs-banner" class="ipfs-banner" style="display:none;">
+        <div class="ipfs-banner-content">
+            <span class="ipfs-icon">&#x1F512;</span>
+            <span class="ipfs-text">
+                <strong>IPFS Verified</strong> — Content-addressed & immutable. Code cannot change.
+                <a href="#" id="ipfs-bookmark" onclick="var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent); if(isMobile) { alert('Tap the Share button (iOS) or Menu ⋮ (Android), then select Add to Home Screen or Bookmark'); } else { alert('Press Ctrl+D (Cmd+D on Mac) to bookmark this page'); } return false;">Bookmark it!</a>
+            </span>
+            <span class="ipfs-cid" id="ipfs-cid" title="Click to copy IPFS URL"></span>
+            <button class="ipfs-close" onclick="document.getElementById('ipfs-banner').style.display='none'; document.body.classList.remove('ipfs-active')" aria-label="Close banner">&times;</button>
+        </div>
+    </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var url = window.location.href;
+        var cidMatch = url.match(/\/ipfs\/([a-zA-Z0-9]+)/);
+        if (cidMatch) {
+            var cid = cidMatch[1];
+            var banner = document.getElementById('ipfs-banner');
+            var cidEl = document.getElementById('ipfs-cid');
+            if (banner && cidEl) {
+                banner.style.display = 'block';
+                document.body.classList.add('ipfs-active');
+                cidEl.style.display = 'inline';
+                cidEl.textContent = cid.slice(0,8) + '...' + cid.slice(-6);
+                cidEl.onclick = function() {
+                    var ipfsUrl = 'https://ipfs.io/ipfs/' + cid + '/';
+                    navigator.clipboard.writeText(ipfsUrl).then(function() {
+                        cidEl.textContent = 'Copied!';
+                        setTimeout(function() {
+                            cidEl.textContent = cid.slice(0,8) + '...' + cid.slice(-6);
+                        }, 1500);
+                    });
+                };
+            }
+        }
+    });
+    </script>
+
  <!-- Notification Container -->
     <div class="notification-container bottom-right" id="notificationContainer"></div>
 
@@ -973,7 +1012,7 @@
                     <div class="staking-management">
                         <div class="management-card">
                             <h3>🪙 Add Reward Token</h3>
-                            <p>Add new ERC20 tokens to be distributed as staking rewards. Costs 20 USDC on Base</p>
+                            <p>Add new ERC20 tokens to be distributed as staking rewards. <span id="addRewardTokenCost">Costs 20 USDC on Base</span></p>
 
                             <div class="form-group">
                                 <label>Reward Token Contract Address</label>
@@ -1012,8 +1051,17 @@
                                 <p style="color: #6c757d; font-style: italic;">No active reward periods.</p>
                             </div>
                         </div>
-                    </div>
                     <button class="btn-primary" onclick="getRewardStats()">getRewardStats</button>
+<br></br><br></br>
+                        <div class="management-card">
+                            <h3>💰 Fetch All Uniswap Fees</h3>
+                            <p>Collect accumulated Uniswap fees from all staked NFT positions owned by the staking contract.</p>
+                            <div id="fetchFeesResult" style="margin: 10px 0; padding: 10px; background: #1a1a2e; border-radius: 8px; display: none;">
+                                <p style="margin: 0;"><span id="fetchFeesStatus">Ready</span></p>
+                            </div>
+                            <button class="btn-success" onclick="fetchAllUniswapFees()">Fetch All Uniswap Fees</button>
+                        </div>
+                    </div>
                 </div>
 
 
@@ -1148,13 +1196,14 @@
                         <p>Stake your Unsiwap NFT tokens to earn rewards and support network security.</p>
                     </div>
 
-                    <div class="info-card2">
+                    <div class="info-card2" id="staking-position-info">
                         <h3>NFT Position Info</h3>
-                        <p>Create Position to Stake Position</p>
+                        <p>Please Create a Position in order to Deposit the Uniswap v4 NFT into staking</p>
                     </div>
                     <div class="form-group">
                         <label>Select Position</label>
-                        <select>
+                        <select id="staking-deposit-select" onchange="updateStakingDepositPositionInfo()">
+                            <option>Connect Wallet to see positions</option>
                         </select>
                     </div>
 
@@ -1163,7 +1212,7 @@
                         <input type="text" id="estimatedRewards" value="0.00 B0x" readonly style="background: #f8f9fa;">
                     </div>
 <h3 style="color: red"> You are now depositing a Uniswap v4 NFT Position to stake.  Withdrawl penalty is 20% to instant withdraw down to 3% after 15 days.  1% after 45 days. It is tracked per NFT, so multiple NFTs will have different withdraw Penalities</h3>
-                    <button class="btn-success" id="depositNFTStakeBtn" onclick="depositNFTStake()">Deposit
+                    <button class="btn-success" id="depositNFTStakeBtn">Deposit
                         NFT</button><br></br><br></br>
 
                     <div class="info-card3">
@@ -1180,7 +1229,7 @@
                     <div class="form-group2">
                         <label>Select NFT to Withdraw</label>
                         <select>
-                            <option>Connect Wallet</option>
+                            <option>Connect Wallet to see positions</option>
                         </select>
                     </div>
 
@@ -1376,7 +1425,7 @@
                     <div class="form-group">
                         <label>Select Position</label>
                         <select>
-                            <!-- Options will be populated by JavaScript -->
+                            <option>Connect Wallet to see positions</option>
                         </select>
                     </div>
                     <!--
@@ -1418,7 +1467,7 @@
                             <option>2.0%</option>
                         </select>
                     </div>
-                    <button class="btn-primary" id="increaseLiquidityBtn" onclick="increaseLiquidity()">Increase
+                    <button class="btn-primary" id="increaseLiquidityBtn">Increase
                         Liquidity</button>
                     <!--      <button class="btn-primary" onclick="getTokenIDsOwnedByMetamask()">Get Metamask StakedTokensOwned</button>
                     <button class="btn-primary" onclick="getTokenIDsOwnedByStaking()">Get Staking Contracted Owned NFTs</button>
@@ -1460,6 +1509,7 @@
                     <div class="form-group">
                         <label>Select Position</label>
                         <select onchange="updatePositionInfo()">
+                            <option>Connect Wallet to see positions</option>
                         </select>
                     </div>
 
@@ -1514,7 +1564,7 @@
                             <option>2.0%</option>
                         </select>
                     </div>
-                    <button class="btn-primary" id="decreaseLiquidityBtn" onclick="decreaseLiquidity()">Remove Liquidity
+                    <button class="btn-primary" id="decreaseLiquidityBtn">Remove Liquidity
                         & Claim Fees</button>
                 </div>
 
@@ -1570,7 +1620,7 @@
                     <div class="form-group">
                         <label>Select Position</label>
                         <select>
-                            <!-- Options will be populated by JavaScript -->
+                            <option>Connect Wallet to see positions</option>
                         </select>
                     </div>
 
@@ -1652,7 +1702,7 @@
                     <div class="form-group">
                         <label>Select Position</label>
                         <select>
-                            <!-- Options will be populated by JavaScript -->
+                            <option>Connect Wallet to see positions</option>
                         </select>
                     </div>
                     <!-- old

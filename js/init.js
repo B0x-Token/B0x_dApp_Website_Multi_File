@@ -848,9 +848,17 @@ document.addEventListener('DOMContentLoaded', async function () {
     // Setup wallet listeners
     await setupWalletListeners();
 
-    // Initialize tabs from URL
-    await initializeTabFromURL();
-    await initializeTabFromDirectParam();
+    // Initialize tab from URL or default to swap
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasUrlTab = urlParams.get('tab') || validTabs.some(tab => urlParams.has(tab));
+
+    if (hasUrlTab) {
+        await initializeTabFromURL();
+        await initializeTabFromDirectParam();
+    } else {
+        // No URL parameter, default to swap
+        switchTab('swap');
+    }
 
     // Render contracts display
     renderContracts();

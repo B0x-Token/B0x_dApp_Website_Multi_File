@@ -6785,3 +6785,159 @@ body.stats-active .content {
 #main-content {
   background-color: #2d2c43;
 }
+
+/* IPFS Verification Banner */
+.ipfs-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(90deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%);
+    border-bottom: 1px solid #00d4aa;
+    padding: 6px 12px;
+    z-index: 10001;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+.ipfs-banner-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    max-width: 1200px;
+    margin: 0 auto;
+    flex-wrap: wrap;
+}
+
+.ipfs-icon {
+    font-size: 14px;
+}
+
+.ipfs-text {
+    color: #e0e0e0;
+}
+
+.ipfs-text strong {
+    color: #00d4aa;
+}
+
+.ipfs-text a {
+    color: #5dade2;
+    text-decoration: none;
+    margin-left: 8px;
+}
+
+.ipfs-text a:hover {
+    text-decoration: underline;
+}
+
+.ipfs-cid {
+    color: #888;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 2px 6px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 4px;
+    display: none;
+}
+
+.ipfs-cid:hover {
+    background: rgba(0,212,170,0.2);
+}
+
+.ipfs-close {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 28px;
+    cursor: pointer;
+    padding: 8px 12px;
+    line-height: 1;
+    margin-left: auto;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ipfs-close:hover {
+    color: #fff;
+}
+
+/* Adjust body padding for fixed banner - applied via JS when banner shows */
+body.ipfs-active {
+    padding-top: 32px;
+}
+
+/* Tablet - banner wraps to 2 lines */
+@media (max-width: 785px) {
+    body.ipfs-active {
+        padding-top: 52px;
+    }
+}
+
+/* Mobile adjustments for IPFS banner */
+@media (max-width: 630px) {
+    .ipfs-banner {
+        font-size: 11px;
+        padding: 8px 12px;
+    }
+
+    .ipfs-banner-content {
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+    }
+
+    /* First line: icon + main text */
+    .ipfs-icon {
+        display: inline;
+    }
+
+    /* Second line: bookmark link */
+    .ipfs-text a {
+        display: block;
+        margin-top: 2px;
+    }
+
+    /* Third line: CID */
+    .ipfs-cid {
+        display: block;
+        margin-top: 2px;
+    }
+
+    .ipfs-close {
+        position: absolute;
+        right: 8px;
+        top: 8px;
+    }
+
+    body.ipfs-active {
+        padding-top: 75px;
+    }
+}
+
+/* Small phones - content shifts, needs more padding */
+@media (max-width: 462px) {
+    body.ipfs-active {
+        padding-top: 85px;
+    }
+
+    body.ipfs-active #main-content {
+        margin-top: 28px;
+    }
+}
+
+/* Extra small screens */
+@media (max-width: 400px) {
+    .ipfs-banner {
+        font-size: 10px;
+        padding: 6px 10px;
+    }
+
+    body.ipfs-active {
+        padding-top: 55px;
+    }
+}

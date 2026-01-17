@@ -30,7 +30,8 @@ import { SPLIT_ROUTE_ABI, MULTICALL_ABI2 } from './abis.js';
 import {
     getSymbolFromAddress,
     formatBalance,
-    tokenAddressesDecimals
+    tokenAddressesDecimals,
+    fetchBalances
 } from './utils.js';
 import {
     checkAllowance,
@@ -285,13 +286,6 @@ async function throttledGetSqrtRtAndPriceRatio(NameOfFunction = "General") {
     console.log("Getting sqrt price ratio:", NameOfFunction);
 }
 
-/**
- * Fetch user balances
- */
-async function fetchBalances() {
-    // Placeholder - import from utils if needed
-    console.log("Fetching balances");
-}
 
 /**
  * Get reward APY

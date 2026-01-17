@@ -1235,6 +1235,7 @@ export async function scanBlocks(fromBlock, toBlock, loopNumbers) {
                 valid_positions: validPositions,
                 nft_owners: nftOwners
             });
+
         }
     }
 }
