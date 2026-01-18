@@ -1896,7 +1896,31 @@ function enableButton(ID, originalText = null) {
 }
 
 /**
- * Helper to approve token if needed
+ * Helper function for retry with exponential backoff
+ */
+async function retryWithBackoffRatio(fn, maxRetries = 5, baseDelay = 2000) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            const isRateLimit = error.message?.includes('rate limit') ||
+                                error.code === -32005 ||
+                                error.message?.includes('-32005') ||
+                                error.data?.httpStatus === 429;
+
+            if (isRateLimit && attempt < maxRetries - 1) {
+                const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+                console.log(`Rate limited, retrying in ${(delay/1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries})...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                throw error;
+            }
+        }
+    }
+}
+
+/**
+ * Helper to approve token if needed (with retry logic for rate limiting)
  * @param {string} tokenToApprove - Token address
  * @param {string} spenderAddress - Spender address
  * @param {BigNumber} requiredAmount - Amount to approve
@@ -1907,10 +1931,16 @@ async function approveIfNeeded(tokenToApprove, spenderAddress, requiredAmount) {
         "function approve(address spender, uint256 amount) returns (bool)"
     ];
     const tokenContract = new ethers.Contract(tokenToApprove, erc20ABI, window.signer);
-    const currentAllowance = await tokenContract.allowance(window.userAddress, spenderAddress);
+
+    const currentAllowance = await retryWithBackoffRatio(async () => {
+        return await tokenContract.allowance(window.userAddress, spenderAddress);
+    });
+
     if (currentAllowance.lt(requiredAmount)) {
         console.log(`Approving ${tokenToApprove} for ${spenderAddress}`);
-        const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
+        const approveTx = await retryWithBackoffRatio(async () => {
+            return await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
+        });
         await approveTx.wait();
         console.log("Approval successful");
     } else {

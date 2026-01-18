@@ -149,7 +149,35 @@ function calculateWithSlippageBigNumber(amount, decimalValueSlippage) {
 }
 
 /**
- * Approve token if needed
+ * Helper function for retry with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @param {number} baseDelay - Base delay in ms
+ * @returns {Promise<any>} - Result of the function
+ */
+async function retryWithBackoff(fn, maxRetries = 5, baseDelay = 2000) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            const isRateLimit = error.message?.includes('rate limit') ||
+                                error.code === -32005 ||
+                                error.message?.includes('-32005') ||
+                                error.data?.httpStatus === 429;
+
+            if (isRateLimit && attempt < maxRetries - 1) {
+                const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+                console.log(`Rate limited, retrying in ${(delay/1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries})...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                throw error;
+            }
+        }
+    }
+}
+
+/**
+ * Approve token if needed (with retry logic for rate limiting)
  * @param {string} tokenToApprove - Token address
  * @param {string} spenderAddress - Spender address
  * @param {BigNumber} requiredAmount - Amount to approve
@@ -161,11 +189,20 @@ async function approveIfNeeded(tokenToApprove, spenderAddress, requiredAmount) {
     ];
 
     const tokenContract = new ethers.Contract(tokenToApprove, erc20ABI, window.signer);
-    const currentAllowance = await tokenContract.allowance(window.userAddress, spenderAddress);
+
+    // Check allowance with retry
+    const currentAllowance = await retryWithBackoff(async () => {
+        return await tokenContract.allowance(window.userAddress, spenderAddress);
+    });
 
     if (currentAllowance.lt(requiredAmount)) {
         console.log(`Approving ${tokenToApprove} for ${spenderAddress}`);
-        const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
+
+        // Send approve transaction with retry
+        const approveTx = await retryWithBackoff(async () => {
+            return await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
+        });
+
         await approveTx.wait();
         console.log("Approval successful");
     } else {
@@ -1826,21 +1863,30 @@ export async function increaseLiquidityStaking() {
 
         showSuccessNotification('Increased Liquidity on Staked Uniswap ID: ' + positionID + ' successfully!', 'Transaction confirmed on blockchain', tx.hash);
 
-        alert("Successfully Increased Liquidity of Staked NFT");
-
         enableButton('increaseLiquidityStakedBtn', 'Increase Staked Position Liquidity');
+
+        // Refresh data after successful transaction (before alert so data is ready)
+        try {
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for blockchain state to update
+            if (window.fetchBalances) await window.fetchBalances();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await getRewardStats();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            if (window.getTokenIDsOwnedByMetamask) {
+                await window.getTokenIDsOwnedByMetamask(true); // Force refresh after increase
+                console.log("Position data refreshed after staking increase");
+            }
+        } catch (refreshError) {
+            console.warn("Error refreshing data after increase:", refreshError);
+        }
+
+        alert("Successfully Increased Liquidity of Staked NFT - Position data has been refreshed");
+
     } catch (error) {
         console.error(`Error increasing liquidity:`, error);
         enableButton('increaseLiquidityStakedBtn', 'Increase Staked Position Liquidity');
         showErrorNotification('Operation Failed', error.message || 'Failed to increase liquidity');
     }
-
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    if (window.fetchBalances) await window.fetchBalances();
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    await getRewardStats();
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    if (window.getTokenIDsOwnedByMetamask) await window.getTokenIDsOwnedByMetamask(true); // Force refresh after increase
 }
 
 // ============================================================================

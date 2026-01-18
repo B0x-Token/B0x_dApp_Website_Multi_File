@@ -247,6 +247,15 @@ export async function runReloadFunctions(fromChecker = false, fromReset = true) 
   await new Promise(resolve => setTimeout(resolve, 200));
         triggerRefresh();
 
+        // Refresh position data (stakingPositionData and positionData)
+        if (window.getTokenIDsOwnedByMetamask) {
+            try {
+                await window.getTokenIDsOwnedByMetamask();
+            } catch (e) {
+                console.warn("getTokenIDsOwnedByMetamask failed:", e);
+            }
+        }
+
         // Refresh swap estimate if on swap page and amount is entered
         if (window.getEstimate) {
             try {

@@ -23,7 +23,7 @@ import { POSITION_FINDER_ABI } from './abis.js';
 import { getSqrtRatioAtTick, approveTokensViaPermit2, toBigNumber } from './contracts.js';
 import { getSymbolFromAddress, tokenAddressesDecimals, fetchBalances } from './utils.js';
 import { getNFTOwners, isSearchingLogs } from './data-loader.js';
-import { updateStakingValues } from './staking.js';
+import { updateStakingValues, totalLiquidityInStakingContract } from './staking.js';
 // ============================================
 // STATE VARIABLES
 // ============================================
@@ -408,7 +408,35 @@ function enableButton(ID, originalText = null) {
 }
 
 /**
- * Approve token if needed
+ * Helper function for retry with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @param {number} baseDelay - Base delay in ms
+ * @returns {Promise<any>} - Result of the function
+ */
+async function retryWithBackoffPositions(fn, maxRetries = 5, baseDelay = 2000) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            const isRateLimit = error.message?.includes('rate limit') ||
+                                error.code === -32005 ||
+                                error.message?.includes('-32005') ||
+                                error.data?.httpStatus === 429;
+
+            if (isRateLimit && attempt < maxRetries - 1) {
+                const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+                console.log(`Rate limited, retrying in ${(delay/1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries})...`);
+                await sleep(delay);
+            } else {
+                throw error;
+            }
+        }
+    }
+}
+
+/**
+ * Approve token if needed (with retry logic for rate limiting)
  * @param {string} tokenToApprove - Token address
  * @param {string} spenderAddress - Spender address
  * @param {BigNumber} requiredAmount - Amount to approve
@@ -420,11 +448,20 @@ async function approveIfNeeded(tokenToApprove, spenderAddress, requiredAmount) {
     ];
 
     const tokenContract = new ethers.Contract(tokenToApprove, erc20ABI, window.signer);
-    const currentAllowance = await tokenContract.allowance(window.userAddress, spenderAddress);
+
+    // Check allowance with retry
+    const currentAllowance = await retryWithBackoffPositions(async () => {
+        return await tokenContract.allowance(window.userAddress, spenderAddress);
+    });
 
     if (currentAllowance.lt(requiredAmount)) {
         console.log(`Approving ${tokenToApprove} for ${spenderAddress}`);
-        const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
+
+        // Send approve transaction with retry
+        const approveTx = await retryWithBackoffPositions(async () => {
+            return await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
+        });
+
         await approveTx.wait();
         console.log("Approval successful");
     } else {
@@ -688,9 +725,34 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
     let stakedResult = null;
     let unstakedResult = null;
 
+    // Retry helper with exponential backoff for rate limiting
+    const retryWithBackoff = async (fn, maxRetries = 5, baseDelay = 2000) => {
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                return await fn();
+            } catch (error) {
+                const isRateLimit = error.message?.includes('rate limit') ||
+                                    error.code === -32005 ||
+                                    error.message?.includes('-32005');
+
+                if (isRateLimit && attempt < maxRetries - 1) {
+                    const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+                    console.log(`Rate limited, retrying in ${(delay/1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries})...`);
+                    await sleep(delay);
+                } else {
+                    throw error;
+                }
+            }
+        }
+    };
+
     try {
+        console.log(`=== MULTICALL #1: Fetching max staked ID + initial positions ===`);
         console.log(`Executing multicall with ${calls.length} calls...`);
-        const results = await multicallContract.aggregate3(calls);
+
+        const results = await retryWithBackoff(async () => {
+            return await multicallContract.aggregate3(calls);
+        });
 
         // Decode getMaxStakedIDforUser result
         if (results[0].success && results[0].returnData !== '0x') {
@@ -719,7 +781,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
         }
 
     } catch (error) {
-        console.log("Error in first multicall:", error);
+        console.log("Error in first multicall after retries:", error);
     }
 
     // Process first staked batch
@@ -772,7 +834,9 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
             }];
 
             try {
-                const additionalResults = await multicallContract.aggregate3(additionalCalls);
+                const additionalResults = await retryWithBackoff(async () => {
+                    return await multicallContract.aggregate3(additionalCalls);
+                });
 
                 if (additionalResults[0].success && additionalResults[0].returnData !== '0x') {
                     const additionalStakedResult = positionFinderInterface.decodeFunctionResult(
@@ -795,7 +859,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
                     poolInfoi = poolInfoi.concat(additionalStakedResult[8]);
                 }
             } catch (error) {
-                console.log(`Error in additional staked multicall batch ${batchNum}:`, error);
+                console.log(`Error in additional staked multicall batch ${batchNum} after retries:`, error);
             }
         }
     }
@@ -832,6 +896,8 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
             const formattedToken2 = ethers.utils.formatUnits(OWNEDtOKEN2[i], decimalsTokenB);
 
             const penaltyWithdrawString = (PenaltyForWithdraw[i] / 1000 * 100) + "%";
+
+            console.log(`Staked position ${tokenId}: TokenA=${formattedToken1} ${tokenASymbol}, TokenB=${formattedToken2} ${tokenBSymbol}, Liquidity=${liquidity[i].toString()}`);
 
             stakingPositionData[idNameID] = {
                 id: idNameID,
@@ -906,7 +972,9 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
             }];
 
             try {
-                const unstakedResults = await multicallContract.aggregate3(unstakedCalls);
+                const unstakedResults = await retryWithBackoff(async () => {
+                    return await multicallContract.aggregate3(unstakedCalls);
+                });
 
                 if (unstakedResults[0].success && unstakedResults[0].returnData !== '0x') {
                     const additionalUnstakedResult = positionFinderInterface.decodeFunctionResult(
@@ -926,7 +994,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
                     unstakedPoolInfoi = unstakedPoolInfoi.concat(additionalUnstakedResult[7]);
                 }
             } catch (error) {
-                console.log(`Error in additional unstaked multicall:`, error);
+                console.log(`Error in additional unstaked multicall after retries:`, error);
             }
         }
     }
@@ -1594,8 +1662,24 @@ export function updateStakingDepositPositionInfo() {
             <h3>NFT Position Info</h3>
             <p>Please Create a Position in order to Deposit the Uniswap v4 NFT into staking</p>
         `;
+        const estimatedRewardsEl = document.getElementById('estimatedRewards');
+        if (estimatedRewardsEl) estimatedRewardsEl.value = "0%";
         return;
     }
+
+    // Calculate estimated percent of staking rewards
+    const positionLiq = parseFloat(position.currentLiquidity);
+    const totalLiq = parseFloat(totalLiquidityInStakingContract.toString());
+    const percentOfStaking = positionLiq / (totalLiq + positionLiq);
+
+    const estimatedRewardsEl = document.getElementById('estimatedRewards');
+    if (estimatedRewardsEl) {
+        estimatedRewardsEl.value = (percentOfStaking * 100).toFixed(4) + "%";
+    }
+
+    console.log("updateStakingDepositPositionInfo - percentOfStaking:", percentOfStaking);
+    console.log("updateStakingDepositPositionInfo - totalLiquidityInStakingContract:", totalLiq);
+    console.log("updateStakingDepositPositionInfo - positionLiq:", positionLiq);
 
     // Display position info (no icons for staking deposit selector)
     infoCard.innerHTML = `
@@ -1603,6 +1687,7 @@ export function updateStakingDepositPositionInfo() {
         <p><strong>Position ID:</strong> #${position.id.split('_')[1]}</p>
         <p><strong>Pool:</strong> ${position.tokenA} / ${position.tokenB} (${position.feeTier})</p>
         <p><strong>Token Amounts:</strong> ${parseFloat(position.currentTokenA).toFixed(6)} ${position.tokenA} & ${parseFloat(position.currentTokenB).toFixed(8)} ${position.tokenB}</p>
+        <p><strong>Current Liquidity:</strong> ${position.currentLiquidity.toFixed(2)}</p>
     `;
 }
 
@@ -2089,9 +2174,7 @@ export async function loadPositionsIntoDappSelections() {
         if (typeof window.updateStakeDecreasePositionInfo === 'function') {
             window.updateStakeDecreasePositionInfo();
         }
-        if (typeof window.updatePositionInfoMAIN_STAKING === 'function') {
-            window.updatePositionInfoMAIN_STAKING();
-        }
+        updateStakingDepositPositionInfo();
         if (typeof window.updatePositionInfoMAIN_UNSTAKING === 'function') {
             window.updatePositionInfoMAIN_UNSTAKING();
         }

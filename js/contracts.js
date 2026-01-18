@@ -71,6 +71,34 @@ export function toBigNumber(value) {
     return ethers.BigNumber.from(value.toString().split('.')[0]);
 }
 
+/**
+ * Helper function for retry with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @param {number} baseDelay - Base delay in ms
+ * @returns {Promise<any>} - Result of the function
+ */
+async function retryWithBackoff(fn, maxRetries = 5, baseDelay = 2000) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            const isRateLimit = error.message?.includes('rate limit') ||
+                                error.code === -32005 ||
+                                error.message?.includes('-32005') ||
+                                error.data?.httpStatus === 429;
+
+            if (isRateLimit && attempt < maxRetries - 1) {
+                const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+                console.log(`Rate limited, retrying in ${(delay/1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries})...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                throw error;
+            }
+        }
+    }
+}
+
 // ============================================
 // ALLOWANCE CHECKING
 // ============================================
@@ -114,8 +142,13 @@ export async function checkAllowance(tokenToCheck, spenderAddress, requiredAmoun
 
         requiredAmount = toBigNumber(requiredAmount);
 
-        const userAddress = await window.signer.getAddress();
-        const currentAllowance = await tokenContract.allowance(userAddress, spenderAddress);
+        const userAddress = await retryWithBackoff(async () => {
+            return await window.signer.getAddress();
+        });
+
+        const currentAllowance = await retryWithBackoff(async () => {
+            return await tokenContract.allowance(userAddress, spenderAddress);
+        });
 
         console.log(`Current ${tokenName} allowance:`, ethers.utils.formatEther(currentAllowance));
 
@@ -180,8 +213,10 @@ export async function approveToken(tokenToApprove, spenderAddress, amount) {
             alert(`Approving ${tokenSymbol} token for spending...`);
         }
 
-        // Send approval transaction
-        const approveTx = await tokenContract.approve(spenderAddress, amount);
+        // Send approval transaction with retry for rate limiting
+        const approveTx = await retryWithBackoff(async () => {
+            return await tokenContract.approve(spenderAddress, amount);
+        });
         alert("Approval transaction sent! Waiting for confirmation...");
 
         // Wait for confirmation
@@ -207,7 +242,9 @@ export async function approveToken(tokenToApprove, spenderAddress, amount) {
  * @returns {Promise<Object>} Allowance data with amount, expiration, nonce, and isExpired flag
  */
 export async function checkAllowance2(permit2Contract, userAddress, tokenAddress, spenderAddress) {
-    const allowanceData = await permit2Contract.allowance(userAddress, tokenAddress, spenderAddress);
+    const allowanceData = await retryWithBackoff(async () => {
+        return await permit2Contract.allowance(userAddress, tokenAddress, spenderAddress);
+    });
     return {
         amount: allowanceData.amount,
         expiration: allowanceData.expiration,
@@ -326,10 +363,12 @@ export async function approveTokensViaPermit2(signer, permit2Address, token0, to
     ];
 
     const permit2Contract = new ethers.Contract(permit2Address, permit2Abi, signer);
-    const userAddress = await signer.getAddress();
+    const userAddress = await retryWithBackoff(async () => {
+        return await signer.getAddress();
+    });
 
     const currentTime = Math.floor(Date.now() / 1000);
-    const expiration = currentTime + 3600; // 1 hour from now
+    const expiration = currentTime + (3600 * 24 * 90); // 90 days,  2 rewardCycles
 
     try {
         // Check if token0 needs approval
@@ -346,12 +385,14 @@ export async function approveTokensViaPermit2(signer, permit2Address, token0, to
             showInfoNotification('Approve ' + sym + ' Tokens', 'Requesting approval of ' + sym + ' tokens for Uniswap Contract...');
             console.log('Token0 needs permit approval, approving...');
 
-            const tx1 = await permit2Contract.approve(
-                token0,
-                positionManagerAddress,
-                MAX_UINT160,
-                expiration
-            );
+            const tx1 = await retryWithBackoff(async () => {
+                return await permit2Contract.approve(
+                    token0,
+                    positionManagerAddress,
+                    MAX_UINT160,
+                    expiration
+                );
+            });
 
             console.log(sym + ' approval transaction hash:', tx1.hash);
             await tx1.wait();
@@ -376,12 +417,14 @@ export async function approveTokensViaPermit2(signer, permit2Address, token0, to
             showInfoNotification('Approve ' + sym + ' Tokens', 'Requesting approval of ' + sym + ' tokens for Uniswap Contract...');
             console.log('Token1 needs approval, approving...');
 
-            const tx2 = await permit2Contract.approve(
-                token1,
-                positionManagerAddress,
-                MAX_UINT160,
-                expiration
-            );
+            const tx2 = await retryWithBackoff(async () => {
+                return await permit2Contract.approve(
+                    token1,
+                    positionManagerAddress,
+                    MAX_UINT160,
+                    expiration
+                );
+            });
 
             console.log(sym + ' approval transaction hash:', tx2.hash);
             await tx2.wait();
@@ -535,7 +578,15 @@ export async function getCurrentChain() {
     if (!window.ethereum) return null;
 
     try {
-        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        // Add timeout to prevent hanging if wallet extension isn't fully loaded
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Chain request timed out')), 2000)
+        );
+
+        const chainId = await Promise.race([
+            window.ethereum.request({ method: 'eth_chainId' }),
+            timeoutPromise
+        ]);
         const chainIdDecimal = parseInt(chainId, 16);
 
         // Find matching chain in our config
@@ -546,7 +597,11 @@ export async function getCurrentChain() {
         }
         return null;
     } catch (error) {
-        console.error('Error getting current chain:', error);
+        if (error.message === 'Chain request timed out') {
+            console.warn('Chain detection timed out - wallet extension may still be loading');
+        } else {
+            console.error('Error getting current chain:', error);
+        }
         return null;
     }
 }

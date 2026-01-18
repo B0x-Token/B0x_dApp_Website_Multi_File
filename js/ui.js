@@ -10,7 +10,7 @@ import { TOKEN_ORDER, TOKEN_ORDERETH } from './utils.js';
 import { tokenIconsBase, tokenIconsETH, ProofOfWorkAddresss, tokenAddresses, contractAddress_Swapper, hookAddress } from './config.js';
 import { positionData, stakingPositionData } from './positions.js';
 import {functionCallCounter, incrementFunctionCallCounter, hasUserMadeSelection, customRPC, customDataSource, customBACKUPDataSource} from './settings.js'
-import {firstRewardsAPYRun} from './staking.js';
+import {firstRewardsAPYRun, totalLiquidityInStakingContract} from './staking.js';
 import {
     setCurrentDifficulty, setNextDifficulty, setRewardPerSolve,
     setBlocksToGo, setAvgRewardTime, calculateMining
@@ -1411,6 +1411,9 @@ export function updatePositionInfoMAIN_STAKING() {
     var positionLiq = parseFloat(position.currentLiquidity);
     var percentOfStaking = positionLiq / (parseFloat(totalLiquidityInStakingContract.toString()) + positionLiq);
     document.getElementById('estimatedRewards').value = percentOfStaking.toFixed(6) * 100 + "%";
+    console.log("percent stats: percentOfStaking = ",percentOfStaking);
+    console.log("percent stats: percentotalLiquidityInStakingContracttOfStaking = ",totalLiquidityInStakingContract);
+    console.log("percent stats: positionLiq = ",positionLiq);
 
     const infoCard = document.querySelector('#staking-main-page .info-card2');
     infoCard.innerHTML = `<h3>Current Selected Position</h3>

@@ -323,7 +323,7 @@ window.formatAddress = UI.formatAddress;
 
 // Dropdowns
 window.loadPositionsIntoDappSelections = Positions.loadPositionsIntoDappSelections;
-window.updatePositionInfoMAIN_STAKING = UI.updatePositionInfoMAIN_STAKING;
+window.updateStakingDepositPositionInfo = Positions.updateStakingDepositPositionInfo;
 window.updatePositionInfoMAIN_UNSTAKING = UI.updatePositionInfoMAIN_UNSTAKING;
 
 // Table rendering

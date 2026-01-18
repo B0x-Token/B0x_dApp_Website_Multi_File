@@ -45,6 +45,7 @@ export let customRPC_ETH = defaultRPC_ETH;
  * Connection attempt tracking
  */
 let attemptf2f21 = 0;
+let timeoutFailures = 0;
 let previousAct = "";
 
 /**
@@ -59,6 +60,32 @@ let connectionState = {
  * Connection lock to prevent simultaneous connection attempts
  */
 let isConnecting = false;
+
+/**
+ * Wait for wallet extension to be fully ready
+ * @param {number} maxWaitMs - Maximum time to wait
+ * @returns {Promise<boolean>} True if wallet is ready
+ */
+async function waitForWalletReady(maxWaitMs = 5000) {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+        if (window.ethereum) {
+            try {
+                // Try a simple call to see if wallet responds
+                const result = await Promise.race([
+                    window.ethereum.request({ method: 'eth_chainId' }),
+                    new Promise((_, reject) => setTimeout(() => reject(), 500))
+                ]);
+                if (result) return true;
+            } catch (e) {
+                // Not ready yet, wait and retry
+            }
+        }
+        await new Promise(r => setTimeout(r, 300));
+    }
+    return false;
+}
 
 // ============================================================================
 // WALLET STATE SETTERS
@@ -155,9 +182,15 @@ export async function checkWalletConnection() {
     console.log("Checking wallet connection");
     if (typeof window.ethereum !== 'undefined' && localStorage.getItem('walletConnected') === 'true') {
         try {
-            const accounts = await window.ethereum.request({
-                method: 'eth_accounts'
-            });
+            // Add timeout to prevent hanging if wallet extension isn't fully loaded
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Wallet request timed out')), 2000)
+            );
+
+            const accounts = await Promise.race([
+                window.ethereum.request({ method: 'eth_accounts' }),
+                timeoutPromise
+            ]);
 
             if (accounts.length > 0) {
                 // Quick minimal setup - don't block on full connectWallet
@@ -188,7 +221,11 @@ export async function checkWalletConnection() {
                 connectWallet().catch(e => console.warn('Background wallet data loading:', e));
             }
         } catch (error) {
-            console.error('Error checking wallet connection:', error);
+            if (error.message === 'Wallet request timed out') {
+                console.warn('Wallet auto-connect timed out - extension may still be loading. User can connect manually.');
+            } else {
+                console.error('Error checking wallet connection:', error);
+            }
         }
     }
 }
@@ -329,49 +366,45 @@ export async function connectWallet(resumeFromStep = null) {
     // Set connection lock
     isConnecting = true;
 
-    attemptf2f21 = attemptf2f21 + 1;
-    if (attemptf2f21 > 2) {
-        alert("A connection request is already pending in your wallet. The page will refresh to clear this. Please connect wallet and approve the connection after refresh.");
-        setTimeout(() => {
-            window.location.reload();
-        }, 2000);
+    // Wait for wallet extension to be fully ready (handles fresh Chrome instances)
+    console.log('Waiting for wallet to be ready...');
+    const walletReady = await waitForWalletReady(3000);
+    if (!walletReady) {
+        // Wallet not responding - auto-refresh since that fixes it
+        console.log('Wallet not ready - refreshing page...');
         isConnecting = false;
+        setTimeout(() => window.location.reload(), 500);
         return null;
     }
+    console.log('Wallet is ready');
 
     try {
-        // Step 1: Request accounts (skip if resuming from later step)
-        if (true) {
-            const accounts = await window.ethereum.request({
-                method: 'eth_requestAccounts'
-            });
+        // Request accounts - wallet is ready so this should work
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
 
-            if (accounts.length === 0) return null;
+        if (!accounts || accounts.length === 0) return null;
 
-            attemptf2f21 = 0;
-            userAddress = accounts[0];
-            walletConnected = true;
+        attemptf2f21 = 0;
+        userAddress = accounts[0];
+        walletConnected = true;
 
-            // Reset position search if switching accounts
-            if (previousAct != userAddress) {
-                // Note: WhereToStartSearch needs to be set by caller
-                // WhereToStartSearch = LAUNCH_UNISWAP_ID;
-                if (window.resetPositionSearch) {
-                    window.resetPositionSearch();
-                }
+        // Reset position search if switching accounts
+        if (previousAct != userAddress) {
+            if (window.resetPositionSearch) {
+                window.resetPositionSearch();
             }
-            previousAct = userAddress;
-
-            localStorage.setItem('walletConnected', 'true');
-            localStorage.setItem('walletAddress', userAddress);
-
-            provider = new ethers.providers.Web3Provider(window.ethereum);
-            signer = provider.getSigner();
-
-            await updateWalletUI(userAddress, true);
-            setupWalletListeners();
-            await switchToBase();
         }
+        previousAct = userAddress;
+
+        localStorage.setItem('walletConnected', 'true');
+        localStorage.setItem('walletAddress', userAddress);
+
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        signer = provider.getSigner();
+
+        await updateWalletUI(userAddress, true);
+        setupWalletListeners();
+        await switchToBase();
 
         // Reset position data first (quick, no RPC)
         if (window.resetPositionData) {
@@ -513,6 +546,7 @@ export async function connectWallet(resumeFromStep = null) {
             await sleep(2000);
             return connectWallet(connectionState.lastStep);
         }
+
         console.log("Error25: ", error);
         handleWalletError(error);
         connectionState.isRecovering = false;
@@ -861,8 +895,8 @@ export async function setupWalletListeners() {
             if (window.updatePositionInfo) {
                 window.updatePositionInfo();
             }
-            if (window.updatePositionInfoMAIN_STAKING) {
-                window.updatePositionInfoMAIN_STAKING();
+            if (window.updateStakingDepositPositionInfo) {
+                window.updateStakingDepositPositionInfo();
             }
             if (window.updatePositionInfoMAIN_UNSTAKING) {
                 window.updatePositionInfoMAIN_UNSTAKING();
