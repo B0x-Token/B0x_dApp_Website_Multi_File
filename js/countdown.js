@@ -239,11 +239,6 @@ export async function runReloadFunctions(fromChecker = false, fromReset = true) 
         console.log("Reload completed at:", now);
   await new Promise(resolve => setTimeout(resolve, 400));
 
-        // Get APY if from checker
-        if (window.GetRewardAPY) {
-            await window.GetRewardAPY();
-        }
-
   await new Promise(resolve => setTimeout(resolve, 200));
         triggerRefresh();
 

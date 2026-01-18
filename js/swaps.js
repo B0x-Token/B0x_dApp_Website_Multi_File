@@ -287,14 +287,6 @@ async function throttledGetSqrtRtAndPriceRatio(NameOfFunction = "General") {
 }
 
 
-/**
- * Get reward APY
- */
-async function GetRewardAPY() {
-    // Placeholder - import from main if needed
-    console.log("Getting reward APY");
-}
-
 // ============================================
 // ROUTE DISCOVERY
 // ============================================
@@ -1184,7 +1176,7 @@ function showErrorDisplay(message) {
  */
 export async function updateEstimateDisplay(fromToken, toToken, estimate, amountIn) {
     if (!window.walletConnected) {
-        await GetRewardAPY();
+        await window.getRewardStats();
     }
 
     fromToken = fromToken.trim();
