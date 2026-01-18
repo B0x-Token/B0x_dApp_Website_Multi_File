@@ -2052,10 +2052,6 @@ export function updateStakePositionInfo() {
         totalLiquidityInput.value = `${parseFloat(position.currentTokenA).toFixed(4)} ${position.tokenA} & ${parseFloat(position.currentTokenB).toFixed(4)} ${position.tokenB}`;
     }
 
-    // Clear input values when position changes
-    const inputs = document.querySelectorAll('#stake-increase input[type="number"]');
-    inputs.forEach(input => input.value = '0');
-
     if (Object.keys(positionData).length === 0) {
         console.log("No positions");
         if (typeof window.disableButtonWithSpinner === 'function') {

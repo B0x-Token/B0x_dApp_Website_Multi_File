@@ -1481,8 +1481,6 @@ export function updatePositionInfo() {
         <p><strong>Unclaimed Fees:</strong> ${parseFloat(position.unclaimedFeesTokenA).toFixed(4)} ${position.tokenA} & ${parseFloat(position.unclaimedFeesTokenB).toFixed(4)} ${position.tokenB}</p>
     `;
 
-    const inputs = document.querySelectorAll('#increase input[type="number"]');
-    inputs.forEach(input => input.value = '0');
     updateTotalLiqIncrease();
 }
 
