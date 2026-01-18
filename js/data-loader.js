@@ -51,7 +51,7 @@
 // Import dependencies
 import { MULTICALL_ABI, MULTICALL_ABI_PAYABLE, CONTRACT_ABI } from './abis.js';
 import { ProofOfWorkAddresss, MULTICALL_ADDRESS } from './config.js';
-import { CONFIG, customRPC, customDataSource, loadSettings } from './settings.js';
+import { CONFIG, customRPC, customDataSource, customBACKUPDataSource ,loadSettings } from './settings.js';
 import { showLoadingWidget, hideLoadingWidget, updateLoadingStatus, updateLoadingStatusWidget, setLoadingProgress } from './ui.js';
 
 // ============================================
@@ -105,6 +105,9 @@ let WeAreSearchingLogsRightNow = false;
  * @type {boolean}
  */
 let latestSearch = false;
+
+// Loop counter for scan progress - persists across scanBlocks() calls
+let scanLoopCounter = 0;
 
 // ============================================
 // GETTERS (for external access to state)
@@ -357,6 +360,7 @@ export async function mainRPCStarterForPositions() {
     await loadSettings();
     CONFIG.RPC_URL = customRPC;
     CONFIG.DATA_URL = customDataSource + "mainnet_uniswap_v4_data.json";
+    CONFIG.DATA_URL_Backup = customBACKUPDataSource + "mainnet_uniswap_v4_data.json";
 
     // Set additional CONFIG properties for RPC monitoring
     CONFIG.START_BLOCK = CONFIG.START_BLOCK || 35937447;
@@ -397,7 +401,17 @@ export async function mainRPCStarterForPositions() {
             console.log(`Remote data current_block: ${remoteBlock}`);
         }
     } catch (error) {
-        console.warn("Failed to fetch remote data for comparison:", error);
+        console.log("Failed to fetch remote data for comparison: try backup", error);
+
+        console.log("Fetching remote data to compare block numbers.. FROM BACKUP data source!");
+        const response2= await fetch(CONFIG.DATA_URL_Backup);
+        if (response2.ok) {
+            remoteData = await response2.json();
+            remoteBlock = remoteData?.metadata?.current_block || 0;
+            console.log(`Remote data current_block: ${remoteBlock}`);
+        }
+
+
     }
 
     // Check localStorage data
@@ -1144,14 +1158,12 @@ export async function scanBlocks(fromBlock, toBlock, loopNumbers) {
     const nftAddress = CONFIG.NFT_ADDRESS || "0x7C5f5A4bBd8fD63184577525326123B519429bDc";
     const transferTopic = CONFIG.TRANSFER_TOPIC || "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
-    let loopCounter = 0;
-
     for (const { start, end } of blockRanges) {
-        loopCounter++;
+        scanLoopCounter++;
 
         if (typeof updateLoadingStatusWidget === 'function' && typeof setLoadingProgress === 'function') {
-            updateLoadingStatusWidget(`Loading All Positions for users<br>Loop #: ${loopCounter} MaxLoop #: ${loopNumbers}`);
-            setLoadingProgress(Math.floor((loopCounter) / loopNumbers * 100));
+            updateLoadingStatusWidget(`Loading All Positions for users<br>Loop #: ${scanLoopCounter} MaxLoop #: ${loopNumbers}`);
+            setLoadingProgress(Math.floor((scanLoopCounter) / loopNumbers * 100));
         }
 
         console.log(` Scanning sub-range: ${start} to ${end} (${end - start + 1} blocks)`);
@@ -1340,6 +1352,8 @@ export async function runContinuous(blocksPerScan = 1000, sleepSeconds = 10) {
             }
 
             if (currentBlockzzzz <= latestBlock) {
+                // Reset loop counter at start of fresh scan session
+                scanLoopCounter = 0;
                 const remainingBlocks = latestBlock - currentBlockzzzz + 1;
                 console.log(`\n${remainingBlocks} blocks behind latest (${currentBlockzzzz} → ${latestBlock})`);
 
