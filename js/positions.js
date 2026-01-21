@@ -721,7 +721,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
                 CONFIG.TARGET_POOL_KEY.currency0,
                 CONFIG.TARGET_POOL_KEY.currency1,
                 CONFIG.TARGET_POOL_KEY.hooks,
-                0
+                minUserHoldings
             ])
         });
     }
@@ -1911,7 +1911,7 @@ export async function loadPositionsIntoDappSelections() {
             Object.values(positionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[1]} - ${position.feeTier} Position`;
                 positionSelect.appendChild(option);
             });
 
@@ -1970,7 +1970,7 @@ export async function loadPositionsIntoDappSelections() {
             Object.values(positionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[1]} - ${position.feeTier} Position`;
                 positionSelect2.appendChild(option);
             });
 
@@ -2011,7 +2011,7 @@ export async function loadPositionsIntoDappSelections() {
             Object.values(positionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[1]} - ${position.feeTier} Position`;
                 stakingMainPageSelect.appendChild(option);
             });
 
@@ -2038,7 +2038,7 @@ export async function loadPositionsIntoDappSelections() {
             Object.values(stakingPositionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[2]} Staked - ${position.feeTier} Position`;
                 withdrawNFTSelect.appendChild(option);
             });
 
@@ -2068,7 +2068,7 @@ export async function loadPositionsIntoDappSelections() {
             Object.values(stakingPositionData).reverse().forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[2]} Staked - ${position.feeTier} Position`;
                 stakeIncreaseSelect.appendChild(option);
             });
 
@@ -2097,7 +2097,7 @@ export async function loadPositionsIntoDappSelections() {
             Object.values(stakingPositionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[2]} Staked - ${position.feeTier} Position`;
                 stakeDecreaseSelect.appendChild(option);
             });
 

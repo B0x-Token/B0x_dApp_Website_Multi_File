@@ -1817,7 +1817,7 @@ export function updatePositionDropdown() {
     Object.values(positionData).forEach(position => {
         const option = document.createElement('option');
         option.value = position.id;
-        option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+        option.textContent = `${position.pool} #${position.id.split('_')[1]} - ${position.feeTier} Position`;
         positionSelect2.appendChild(option);
     });
 

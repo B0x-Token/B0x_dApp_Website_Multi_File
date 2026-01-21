@@ -414,7 +414,7 @@ export function setupDOMListeners() {
             Object.values(positionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[1]} - ${position.feeTier} Position`;
                 positionSelect.appendChild(option);
             });
         }
@@ -433,7 +433,7 @@ export function setupDOMListeners() {
             Object.values(positionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Position #${position.id.split('_')[1]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[1]} - ${position.feeTier} Position`;
                 decreasePositionSelect.appendChild(option);
             });
         }
@@ -451,7 +451,7 @@ export function setupDOMListeners() {
             Object.values(stakingPositionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[2]} Staked - ${position.feeTier} Position`;
                 positionSelectMainPageWithdrawNFT.appendChild(option);
             });
         }
@@ -470,7 +470,7 @@ export function setupDOMListeners() {
             Object.values(stakingPositionData).reverse().forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[2]} Staked - ${position.feeTier} Position`;
                 stakePositionSelect.appendChild(option);
             });
         }
@@ -490,7 +490,7 @@ export function setupDOMListeners() {
             Object.values(stakingPositionData).forEach(position => {
                 const option = document.createElement('option');
                 option.value = position.id;
-                option.textContent = `${position.pool} - ${position.feeTier} - Stake Position #${position.id.split('_')[2]}`;
+                option.textContent = `${position.pool} #${position.id.split('_')[2]} Staked - ${position.feeTier} Position`;
                 stakeDecreasePositionSelect.appendChild(option);
             });
         }

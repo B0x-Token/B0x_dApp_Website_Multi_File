@@ -637,9 +637,6 @@ export function saveMinStaking() {
         return;
     }
 
-    if (value < appSettings.minStaking && window.WhereToStartSearchStaked !== undefined) {
-        window.WhereToStartSearchStaked = 0;
-    }
 
     appSettings.minStaking = value;
     localStorage.setItem('stakingSettings', JSON.stringify(appSettings));
@@ -663,9 +660,6 @@ export function saveMinUserHoldings() {
         return;
     }
 
-    if (value < appSettings.minUserHoldings && window.WhereToStartSearch !== undefined && window.LAUNCH_UNISWAP_ID !== undefined) {
-        window.WhereToStartSearch = window.LAUNCH_UNISWAP_ID;
-    }
 
     appSettings.minUserHoldings = value;
     localStorage.setItem('stakingSettings', JSON.stringify(appSettings));
