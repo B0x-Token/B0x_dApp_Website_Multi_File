@@ -410,6 +410,11 @@ window.restoreDefaultBACKUPCustomDataSource = Settings.restoreDefaultBACKUPCusto
 window.saveMinStaking = Settings.saveMinStaking;
 window.saveMinUserHoldings = Settings.saveMinUserHoldings;
 window.setupUserSelectionTracking = Settings.setupUserSelectionTracking;
+window.initDataSourceLinks = Settings.initDataSourceLinks;
+window.handleMinedBlocksUpload = Settings.handleMinedBlocksUpload;
+window.handleUniswapDataUpload = Settings.handleUniswapDataUpload;
+window.downloadMinedBlocksData = Settings.downloadMinedBlocksData;
+window.downloadUniswapData = Settings.downloadUniswapData;
 window.CONFIG = Settings.CONFIG;
 
 // Expose settings variables (these get updated by loadSettings)

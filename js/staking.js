@@ -1380,7 +1380,7 @@ export async function getRewardStats() {
         tokenAddresses1 = JSON.parse(rawString);
         console.log("Parsed successfully:", tokenAddresses1);
     } catch (error) {
-        console.error("Still can't parse:", error);
+        console.log("Still can't parse (not big deal): ", error);
         tokenAddresses1 = rawString;
     }
 

@@ -475,33 +475,14 @@ let statsDataLoadedAt = 0; // Timestamp of last stats load
  * @param {string} tabName - Name of tab to switch to
  */
 export async function switchTab(tabName) {
+    console.log("called switchTab: ", tabName);
     // Store previous tab and update immediately to prevent race conditions
     const previousTab = PreviousTabName;
     PreviousTabName = tabName;
 
     var name = '#' + tabName;
     getNotificationWidget().positionInContainer(name);
-    if (!window.walletConnected) {
-        console.log("Wallet not connected");
-    }else{
-        if(tabName != 'convert' && tabName != "settings" && tabName != "contract-info" && tabName != "whitepaper" && tabName != "miner");{
 
-            await switchToBase();
-        }
-
-        // Preload position data in background for any tab (with cache check)
-        if (!window.positionsLoaded && typeof window.getTokenIDsOwnedByMetamask === 'function') {
-            window.positionsLoaded = true;
-            window.positionsLoadPromise = window.getTokenIDsOwnedByMetamask().then(() => {
-                if (typeof window.loadPositionsIntoDappSelections === 'function') {
-                    return window.loadPositionsIntoDappSelections();
-                }
-            }).catch(e => {
-                console.warn('Failed to preload positions:', e);
-                window.positionsLoaded = false; // Allow retry on failure
-            });
-        }
-    }
 
     // Hide all pages
     const pages = document.querySelectorAll('.page');
@@ -522,9 +503,52 @@ export async function switchTab(tabName) {
     if (selectedPage) {
         selectedPage.classList.add('active');
     }
+    
+    if (tabName == 'stats') {
+
+        // Always ensure stats-home is visible when switching to stats tab
+        switchTab2('stats-home');
+
+    }
+        
 
     console.log("Switched to tab:", tabName);
     updateURL(tabName);
+
+
+
+    if (!window.walletConnected) {
+        console.log("Wallet not connected");
+    }else{
+        if(tabName != 'convert' && tabName != "settings" && tabName != "contract-info" && tabName != "whitepaper" && tabName != "miner"){
+
+            await switchToBase();
+        }
+
+                    // Preload position data in background for any tab (with cache check)
+            if(!window.positionsLoaded){
+                try {
+                    await window.getTokenIDsOwnedByMetamask(true);
+                    console.log("SwitchTabA position Loaded");
+                    window.positionsLoaded = true; 
+                
+                } catch (e) {
+                    console.warn('Failed to preload getTokenIDsOwnedByMetamask(true):', e);
+                    window.positionsLoaded = false; // Allow retry on failure
+                }
+
+            }else if(typeof window.getTokenIDsOwnedByMetamask === 'function') {
+                try {
+                    await window.getTokenIDsOwnedByMetamask();
+                    console.log("SwitchTabf position Loaded");
+                    window.positionsLoaded = true;
+                } catch (e) {
+                    console.warn('Failed to preload positions:', e);
+                    window.positionsLoaded = false; // Allow retry on failure
+                }
+            }
+                    
+    }
 
     if (tabName == "staking") {
         tabName = "staking-main-page";
@@ -537,8 +561,6 @@ export async function switchTab(tabName) {
     }
     // Tab-specific data loading
     if (tabName == 'stats') {
-        // Always ensure stats-home is visible when switching to stats tab
-        switchTab2('stats-home');
 
         // Only load data if coming from a different tab or 3 minutes have passed
         const statsStale = (Date.now() - statsDataLoadedAt) > 180000; // 3 minutes
@@ -570,10 +592,6 @@ export async function switchTab(tabName) {
             if (typeof window.getRewardStats === 'function') {
                 await window.getRewardStats();
             }
-            // Wait for preloaded positions if needed
-            if (window.positionsLoadPromise) {
-                await window.positionsLoadPromise;
-            }
         }
         if (typeof window.updateStakingStats === 'function') {
             window.updateStakingStats();
@@ -601,10 +619,7 @@ export async function switchTab(tabName) {
                     );
                 }
             }
-            // Wait for preloaded positions
-            if (window.positionsLoadPromise) {
-                await window.positionsLoadPromise;
-            }
+
             // Update the position info displays
             if (tabName === 'stake-increase' && typeof window.updateStakePositionInfo === 'function') {
                 window.updateStakePositionInfo();
@@ -615,14 +630,9 @@ export async function switchTab(tabName) {
         }
     } else if (tabName === 'liquidity-positions') {
         // Wait for preloaded positions
-        if (window.walletConnected && window.positionsLoadPromise) {
-            await window.positionsLoadPromise;
-        }
     } else if (tabName === 'create' || tabName === 'increase' || tabName === 'decrease') {
         // Wait for preloaded positions
-        if (window.walletConnected && window.positionsLoadPromise) {
-            await window.positionsLoadPromise;
-        }
+
     } else if (tabName === 'side-pools') {
         // Load pool fees data
         if (typeof window.getAllFees === 'function') {
@@ -671,12 +681,6 @@ export async function switchTab(tabName) {
                     } catch (e) {
                         console.warn('Failed to load wallet balances:', e);
                     }
-                }
-            }
-            // Wait for preloaded positions for increase/decrease liquidity
-            if (tabName === 'increase-liquidity' || tabName === 'decrease-liquidity') {
-                if (window.positionsLoadPromise) {
-                    await window.positionsLoadPromise;
                 }
             }
         }
@@ -1664,7 +1668,7 @@ export function updateStakingValues(stakedAmounts, apy) {
         var tokenAddresses1;
         tokenAddresses1 = JSON.parse(rawString);
     } catch (error) {
-        console.error("Still can't parse:", error);
+        console.log("Still can't parse (not big deal): ", error);
         tokenAddresses1 = rawString;
     }
 

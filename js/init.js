@@ -53,6 +53,11 @@ export async function initializeDApp() {
         await Settings.loadSettings();
         console.log('✓ Settings loaded');
 
+        // Initialize data source links in settings page
+        if (typeof Settings.initDataSourceLinks === 'function') {
+            Settings.initDataSourceLinks();
+        }
+
         // Check for existing wallet connection
         await checkWalletConnection();
         console.log('✓ Wallet connection checked');

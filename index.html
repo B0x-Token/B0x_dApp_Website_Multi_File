@@ -431,7 +431,7 @@
                         <!-- Miner Statistics Sections -->
                         <div id="row-miners2">
                             <div class="section">
-                                <h4>Block distribution since last adjustment</h4>
+                                <h4 id="block-distribution-heading2">Block distribution since last adjustment</h4>
                                 <div class="chart-containerf">
                                     <div class="pie-chart-wrapper">
                                         <div id="blockdistributionpiechart2"></div>
@@ -451,7 +451,7 @@
 
                         <div id="row-miners">
                             <div class="section">
-                                <h4>Block distribution since launch</h4>
+                                <h4 id="block-distribution-heading">Block distribution since launch</h4>
                                 <div class="chart-containerf">
                                     <div class="pie-chart-wrapper">
                                         <div id="blockdistributionpiechart"></div>
@@ -471,7 +471,7 @@
 
                         <div id="row-blocks">
                             <div class="section">
-                                <h4>Blocks solved since launch</h4>
+                                <h4 id="blocks-solved-heading">Blocks solved since launch</h4>
                                 <div class="stats-table-wrapper">
                                     <table class="blocks-table">
                                         <tbody id="blockstats">
@@ -482,7 +482,7 @@
                                     </table>
                                     <div id="blocks-load-more-container" style="text-align: center; padding: 20px; display: none;">
                                         <p id="blocks-status" style="margin-bottom: 10px; color: #888;"></p>
-                                        <button id="blocks-load-more-btn" class="primary-button" style="padding: 10px 30px;">Load More Blocks</button>
+                                        <button id="blocks-load-more-btn" class="primary-button" style="padding: 10px 30px; display: block; margin: 0 auto;">Load More Blocks</button>
                                     </div>
                                 </div>
                             </div>
@@ -997,6 +997,59 @@
                             <button class="btn-primary" onclick="saveMinUserHoldings()">Save Minimum Holdings</button>
                             <div id="holdingsSuccess" class="success-message" style="display: none;">Minimum holdings
                                 amount saved successfully!</div>
+                        </div>
+
+                        <br></br><br></br>
+                        <div class="settings-form">
+                            <h3>📁 Offline Data Management</h3>
+                            <p>Upload JSON data files to restore cached data when servers are offline. This saves time on full refreshes.</p>
+
+                            <!-- Current Data Source URLs -->
+                            <div class="form-group" style="margin-bottom: 20px;">
+                                <label>Current Data Source URLs:</label>
+                                <div style="font-size: 0.9em; margin-top: 5px;">
+                                    <div style="margin-bottom: 18px;">
+                                        <strong>Uniswap V4 Data:</strong><br>
+                                        <a id="uniswapDataUrlPrimary" href="about:blank" target="_blank" style="word-break: break-all; color: white;">Loading...</a><br>
+                                        <a id="uniswapDataUrlBackup" href="about:blank" target="_blank" style="word-break: break-all; color: #888;">Loading...</a>
+                                    </div>
+                                    <div style="margin-bottom: 18px;">
+                                        <strong>Mined Blocks:</strong><br>
+                                        <a id="minedBlocksUrlPrimary" href="about:blank" target="_blank" style="word-break: break-all; color: white;">Loading...</a><br>
+                                        <a id="minedBlocksUrlBackup" href="about:blank" target="_blank" style="word-break: break-all; color: #888;">Loading...</a>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Upload Uniswap Data -->
+                            <div class="form-group" style="margin-top: 20px;">
+                                <label>Upload mainnet_uniswap_v4_data.json</label>
+                                <div class="input-group" style="flex-direction: column; align-items: flex-start;">
+                                    <input type="file" id="uploadUniswapData" accept=".json" style="margin-bottom: 10px;">
+                                    <button class="btn-primary" onclick="handleUniswapDataUpload()">Upload & Apply</button>
+                                </div>
+                                <div id="uniswapDataUploadStatus" style="margin-top: 10px;"></div>
+                            </div>
+
+
+                            <!-- Upload Mined Blocks -->
+                            <div class="form-group">
+                                <label>Upload mined_blocks_mainnet.json</label>
+                                <div class="input-group" style="flex-direction: column; align-items: flex-start;">
+                                    <input type="file" id="uploadMinedBlocks" accept=".json" style="margin-bottom: 10px;">
+                                    <button class="btn-primary" onclick="handleMinedBlocksUpload()">Upload & Apply</button>
+                                </div>
+                                <div id="minedBlocksUploadStatus" style="margin-top: 10px;"></div>
+                            </div>
+
+                            <!-- Download Current Data -->
+                            <div class="form-group" style="margin-top: 20px;">
+                                <label>Download Current Cached Data:</label>
+                                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                                    <button class="btn-secondary" onclick="downloadUniswapData()">Download Uniswap Data</button>
+                                    <button class="btn-secondary" onclick="downloadMinedBlocksData()">Download Mined Blocks</button>
+                                </div>
+                            </div>
                         </div>
 
                     </div>

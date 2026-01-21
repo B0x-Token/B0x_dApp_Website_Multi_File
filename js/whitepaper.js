@@ -66,13 +66,23 @@ function initFadeInAnimations() {
 function initSmoothScrolling() {
     document.querySelectorAll('a[href^="#"]').forEach(anchor => {
         anchor.addEventListener('click', function (e) {
+            const href = this.getAttribute('href');
+            // Only handle internal anchor links (starting with # and having more than just #)
+            if (!href || href === '#' || !href.startsWith('#') || href.length < 2) {
+                return;
+            }
             e.preventDefault();
-            const target = document.querySelector(this.getAttribute('href'));
-            if (target) {
-                target.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
+            try {
+                const target = document.querySelector(href);
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            } catch (err) {
+                // Invalid selector, ignore
+                console.warn('Invalid anchor selector:', href);
             }
         });
     });

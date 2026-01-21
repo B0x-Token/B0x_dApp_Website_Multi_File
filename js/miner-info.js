@@ -32,6 +32,9 @@ const _BLOCK_EXPLORER_TX_URL = 'https://basescan.org/tx/';
 const _BLOCK_EXPLORER_BLOCK_URL = 'https://basescan.org/block/';
 const _SECONDS_PER_ETH_BLOCK = 2;
 
+// Global lock to prevent concurrent getLogs operations
+let isGetLogsRunning = false;
+
 // ============================================
 // POOL COLORS AND KNOWN MINERS
 // ============================================
@@ -376,7 +379,7 @@ function renderBlocksBatch(startIndex, count, append = false) {
         return;
     }
 
-    const { get_date_from_eth_block, known_miners, _BLOCK_EXPLORER_TX_URL, _BLOCK_EXPLORER_BLOCK_URL } = blockRenderContext;
+    const { get_relative_time_from_eth_block, known_miners, _BLOCK_EXPLORER_TX_URL, _BLOCK_EXPLORER_BLOCK_URL } = blockRenderContext;
 
     const endIndex = Math.min(startIndex + count, allMinedBlocks.length);
     let innerhtml_buffer = '';
@@ -440,20 +443,20 @@ function renderBlocksBatch(startIndex, count, append = false) {
             // Add the new period row with placeholder for next update
             if (eth_block > 36415630) {
                 innerhtml_buffer += '<tr><td id="statsTime"">'
-                    + get_date_from_eth_block(eth_block) + '</td><td>'
+                    + get_relative_time_from_eth_block(eth_block) + '</td><td>'
                     + '<b>New difficulty period</b>' + '</td><td>'
                     + '<b>New Challenge</b>'
                     + '</td><td><b> Previous Period had</b></td><td class="stat-value"><b>PeriodNumberperiod Mints</b></td></tr>';
             } else {
                 innerhtml_buffer += '<tr><td id="statsTime">'
-                    + get_date_from_eth_block(eth_block) + '</td><td>'
+                    + get_relative_time_from_eth_block(eth_block) + '</td><td>'
                     + '<b>New difficulty period</b>' + '</td><td>'
                     + '<b>New Challenge</b>'
                     + '</td><td><b> Previous Period had</b></td><td class="stat-value"><b>2016 Mints</b></td></tr>';
             }
         } else {
             innerhtml_buffer += '<tr><td id="statsTime">'
-                + get_date_from_eth_block(eth_block) + '</td><td class="hash2">'
+                + get_relative_time_from_eth_block(eth_block) + '</td><td class="hash2">'
                 + '<a href="' + block_url + '" target="_blank">' + eth_block + '</a></td><td class="hash">'
                 + '<a href="' + transaction_url + '" title="' + tx_hash + '" target="_blank">'
                 + tx_hash.substr(0, 16) + '...</a></td><td align="right" style="text-overflow:ellipsis;white-space: nowrap;overflow: hidden;">'
@@ -492,8 +495,8 @@ function updateBlocksPaginationUI() {
     if (remaining > 0) {
         container.style.display = 'block';
         statusEl.textContent = `Showing ${currentlyDisplayedBlocks.toLocaleString()} of ${totalBlocks.toLocaleString()} blocks (${remaining.toLocaleString()} remaining)`;
-        btnEl.style.display = 'inline-block';
-        btnEl.textContent = `Load ${Math.min(BLOCKS_PER_PAGE, remaining).toLocaleString()} More Blocks`;
+        btnEl.style.display = 'block';
+        btnEl.textContent = `Load ${Math.min(BLOCKS_PER_PAGE, remaining).toLocaleString()} More Blocks and Fetch Another 3,200 Mints`;
     } else if (totalBlocks > 0) {
         container.style.display = 'block';
         statusEl.textContent = `Showing all ${totalBlocks.toLocaleString()} blocks`;
@@ -506,11 +509,31 @@ function updateBlocksPaginationUI() {
 /**
  * Handler for "Load More" button click
  */
-export function loadMoreBlocks() {
+export async function loadMoreBlocks() {
     if (currentlyDisplayedBlocks < allMinedBlocks.length) {
         renderBlocksBatch(currentlyDisplayedBlocks, BLOCKS_PER_PAGE, true);
     }
+    console.log('📥 User requested to load more blocks and fetch another 3200 mints...');
+
+    var provids = window.walletConnected ? window.provider : window.providerTempStats;
+    if (!provids) {
+        provids = new ethers.providers.JsonRpcProvider(customRPC);
+    }
+
+    // Get the necessary parameters from cached stats
+    const provider = provids;
+    const blockNumber = window.cachedContractStats?.blockNumber || null;
+    const lastBaseBlock = window.cachedContractStats?.latestDiffPeriod || null;
+
+    // Call with forceLoadMore = true to fetch another 3200 mints
+    await updateAllMinerInfoBackwardsOfflineServer(
+        provider,
+        blockNumber,
+        lastBaseBlock,
+        true  // This will fetch another 3200 mints
+    );
 }
+
 
 // ============================================
 // MAIN MINING INFO FUNCTIONS
@@ -521,10 +544,19 @@ export function loadMoreBlocks() {
  * Handles connection and provider setup
  */
 export async function updateAllMinerInfoFirst() {
-    var provids = window.walletConnected ? window.provider : window.providerTempStats;
-   if (!provids) {
-        provids = new ethers.providers.JsonRpcProvider(customRPC);
-    }
+
+
+                                                                                    
+  var provids;                                                                  
+  if (window.walletConnected && window.provider) {                              
+      provids = window.provider;                                                
+  } else if (window.providerTempStats) {                                        
+      provids = window.providerTempStats;                                       
+  } else {                                                                      
+      provids = new ethers.providers.JsonRpcProvider(customRPC);                
+  }                                                                             
+                                  
+    console.log("RPC IS: ",provids);
     // Use block number from cachedContractStats if available (from super multicall in staking.js)
     let blockNumber = null;
     if (window.cachedContractStats && window.cachedContractStats.blockNumber) {
@@ -546,13 +578,46 @@ export async function updateAllMinerInfoFirst() {
         console.log("window.cachedContractStats:", window.cachedContractStats);
     }
 
+    if(startedLogSearch == true){
+
+        console.warn("startedLogSearch is true we are already searching logs in the data base dont start again");
+        return;
+    }
     await updateAllMinerInfo(provids, blockNumber, lastBaseBlock);
+
+        startedLogSearch = false;
 }
+
+
+
+function updateLoadingPercentage(percentageLoaded) {
+    // Update minerstats2
+    document.getElementById('minerstats2').innerHTML = `
+        <tr>
+            <td colspan="6">Loading info from the blockchain ${percentageLoaded} please wait</td>
+        </tr>
+    `;
+    
+    // Update minerstats
+    document.getElementById('minerstats').innerHTML = `
+        <tr>
+            <td colspan="5">Loading info from the blockchain ${percentageLoaded} please wait</td>
+        </tr>
+    `;
+    
+    // Update blockstats
+    document.getElementById('blockstats').innerHTML = `
+        <tr>
+            <td colspan="5">Loading info from the blockchain ${percentageLoaded} please wait</td>
+        </tr>
+    `;
+}
+
 
 // IMPORT THE FULL updateAllMinerInfo from script.js lines 18827-19951
 // This is the massive 1100+ line function - I'll add a simplified version
 // that calls out to script.js for now, then we can fully migrate it
-
+let startedLogSearch = false;
 /**
  * Core mining information update function
  * Processes all mined blocks, calculates statistics, updates displays
@@ -561,6 +626,12 @@ export async function updateAllMinerInfoFirst() {
  */
 export async function updateAllMinerInfo(providerParam, blockNumberParam = null, lastBaseBlock = null) {
     console.log('updateAllMinerInfo');
+
+    // Check if another getLogs operation is already running
+    if (isGetLogsRunning) {
+        console.log('⏸️ Another getLogs operation is already running, skipping updateAllMinerInfo');
+        return;
+    }
 
     var previousChallenge = "0x0";
     var totalZKBTC_Mined = [];
@@ -604,96 +675,145 @@ export async function updateAllMinerInfo(providerParam, blockNumberParam = null,
     // check to see if the browser has any data in localStorage we can use.
     // don't use the data, though, if it's from an old difficulty period
     try {
-        // Load local storage data first
-        var last_diff_block_storage = Number(localStorage.getItem('lastDifficultyStartBlock_EraBitcoin2_afbRAFFABC_B0x1'));
-        last_imported_mint_block = Number(localStorage.getItem('lastMintBlock_EraBitcoin2_afbRAFFABC_B0x1'));
-        previousChallenge = JSON.parse(localStorage.getItem('mintData_GreekWedding2_B0x1'));
-        console.log("previous ended challenge is this, starting here");
-        var mint_data = localStorage.getItem('mintData_EraBitcoin2_afbRAFFABC_B0x1');
+    // Load local storage data first
+    var last_diff_block_storage = Number(localStorage.getItem('lastDifficultyStartBlock_EraBitcoin2_afbRAFFABC_B0x1'));
+    last_imported_mint_block = Number(localStorage.getItem('lastMintBlock_EraBitcoin2_afbRAFFABC_B0x1'));
+    previousChallenge = JSON.parse(localStorage.getItem('mintData_GreekWedding2_B0x1'));
+    console.log("previous ended challenge is this, starting here");
+    var mint_data = localStorage.getItem('mintData_EraBitcoin2_afbRAFFABC_B0x1');
 
-        console.log('last_imported_mint_block: ', last_imported_mint_block);
-        let localMinedBlocks = [];
-        let localLatestBlock = 0;
+    console.log('last_imported_mint_block: ', last_imported_mint_block);
+    let localMinedBlocks = [];
+    let localLatestBlock = 37667909;
 
-        if (mint_data !== null) {
-            localMinedBlocks = JSON.parse(mint_data);
-            // Find the highest block number in local data
-            localLatestBlock = last_imported_mint_block;
-            console.log('Local storage has', localMinedBlocks.length, 'blocks, latest:', localLatestBlock);
-        }
+    if (mint_data !== null) {
+        localMinedBlocks = JSON.parse(mint_data);
+        // Find the highest block number in local data
+        localLatestBlock = last_imported_mint_block;
+        console.log('Local storage has', localMinedBlocks.length, 'blocks, latest:', localLatestBlock);
+    }
 
-        // Fetch remote data
-        let remoteMinedBlocks = [];
-        let remoteLatestBlock = 0;
+    // Primary and backup URLs
+    const primaryUrl = customDataSource + 'mined_blocks_mainnet.json';
+    const backupUrl = customBACKUPDataSource + 'mined_blocks_mainnet.json';
 
-        // Primary and backup URLs
-        const primaryUrl = customDataSource + 'mined_blocks_mainnet.json';
-        const backupUrl = customBACKUPDataSource + 'mined_blocks_mainnet.json';
-
+    // Fetch remote data helper function
+    const fetchRemoteData = async (url, label) => {
         try {
-            console.log('Attempting to fetch from primary source...');
-            const response = await fetch(primaryUrl);
+            console.log(`Attempting to fetch from ${label} source...`);
+            const response = await fetch(url);
 
             if (response.ok) {
                 const remoteData = await response.json();
-                remoteMinedBlocks = remoteData.mined_blocks;
-                remoteLatestBlock = remoteData.latest_block_number;
-                console.log('✅ Primary source: Remote data has', remoteMinedBlocks.length, 'blocks, latest:', remoteLatestBlock);
-
-                // Update previousChallenge if available in remote data
-                if (remoteData.previous_challenge) {
-                    previousChallenge = remoteData.previous_challenge;
-                }
+                const blocks = remoteData.mined_blocks;
+                const latestBlock = remoteData.latest_block_number;
+                console.log(`✅ ${label} source: Remote data has`, blocks.length, 'blocks, latest:', latestBlock);
+                
+                return {
+                    minedBlocks: blocks,
+                    latestBlock: latestBlock,
+                    previousChallenge: remoteData.previous_challenge || null,
+                    success: true
+                };
             } else {
-                throw new Error(`Primary source failed with status: ${response.status}`);
+                throw new Error(`${label} source failed with status: ${response.status}`);
             }
-        } catch (primaryError) {
-            console.warn('⚠️ Primary source failed:', primaryError.message);
-            console.log('🔄 Falling back to GitHub backup...');
-
-            try {
-                const backupResponse = await fetch(backupUrl);
-
-                if (backupResponse.ok) {
-                    const remoteData = await backupResponse.json();
-                    remoteMinedBlocks = remoteData.mined_blocks;
-                    remoteLatestBlock = remoteData.latest_block_number;
-                    console.log('✅ Backup source: Remote data has', remoteMinedBlocks.length, 'blocks, latest:', remoteLatestBlock);
-
-                    // Update previousChallenge if available in remote data
-                    if (remoteData.previous_challenge) {
-                        previousChallenge = remoteData.previous_challenge;
-                    }
-                } else {
-                    throw new Error(`Backup source failed with status: ${backupResponse.status}`);
-                }
-            } catch (backupError) {
-                console.error('❌ Both primary and backup sources failed!');
-                console.error('Primary error:', primaryError.message);
-                console.error('Backup error:', backupError.message);
-
-                // Handle the case when both sources fail
-                throw new Error('All data sources unavailable');
-            }
+        } catch (error) {
+            console.warn(`⚠️ ${label} source failed:`, error.message);
+            return {
+                minedBlocks: [],
+                latestBlock: 0,
+                previousChallenge: null,
+                success: false
+            };
         }
+    };
 
-        // Compare and choose the best dataset
-        if (remoteLatestBlock > localLatestBlock) {
-            console.log('Using REMOTE data (more recent)');
-            mined_blocks = remoteMinedBlocks;
-            last_imported_mint_block = remoteLatestBlock;
+    // Fetch both sources in parallel
+    console.log('🔄 Fetching from both primary and backup sources...');
+    const [primaryResult, backupResult] = await Promise.all([
+        fetchRemoteData(primaryUrl, 'Primary'),
+        fetchRemoteData(backupUrl, 'Backup')
+    ]);
 
-            // Update localStorage with remote data
-            localStorage.setItem('mintData_EraBitcoin2_afbRAFFABC_B0x1', JSON.stringify(remoteMinedBlocks));
-            localStorage.setItem('lastMintBlock_EraBitcoin2_afbRAFFABC_B0x1', remoteLatestBlock.toString());
-            if (previousChallenge) {
-                localStorage.setItem('mintData_GreekWedding2_B0x1', JSON.stringify(previousChallenge));
-            }
+    // Determine which remote source is freshest
+    let remoteMinedBlocks = [];
+    let remoteLatestBlock = 0;
+    let remotePreviousChallenge = null;
+    let remoteSource = null;
+
+    if(startedLogSearch == true){
+        console.warn("startedLogSearch is true!");
+            return;
+    }else{
+        startedLogSearch = true;
+    }
+
+
+    if (primaryResult.success && backupResult.success) {
+        // Both succeeded - use the one with higher block number
+        if (primaryResult.latestBlock >= backupResult.latestBlock) {
+            remoteMinedBlocks = primaryResult.minedBlocks;
+            remoteLatestBlock = primaryResult.latestBlock;
+            remotePreviousChallenge = primaryResult.previousChallenge;
+            remoteSource = 'Primary';
+            console.log(`✓ Using Primary source (block ${primaryResult.latestBlock} >= backup block ${backupResult.latestBlock})`);
         } else {
-            console.log('Using LOCAL data');
-            mined_blocks = localMinedBlocks;
-            last_imported_mint_block = localLatestBlock;
+            remoteMinedBlocks = backupResult.minedBlocks;
+            remoteLatestBlock = backupResult.latestBlock;
+            remotePreviousChallenge = backupResult.previousChallenge;
+            remoteSource = 'Backup';
+            console.log(`✓ Using Backup source (block ${backupResult.latestBlock} > primary block ${primaryResult.latestBlock})`);
         }
+    } else if (primaryResult.success) {
+        // Only primary succeeded
+        remoteMinedBlocks = primaryResult.minedBlocks;
+        remoteLatestBlock = primaryResult.latestBlock;
+        remotePreviousChallenge = primaryResult.previousChallenge;
+        remoteSource = 'Primary';
+        console.log('✓ Using Primary source (backup unavailable)');
+    } else if (backupResult.success) {
+        // Only backup succeeded
+        remoteMinedBlocks = backupResult.minedBlocks;
+        remoteLatestBlock = backupResult.latestBlock;
+        remotePreviousChallenge = backupResult.previousChallenge;
+        remoteSource = 'Backup';
+        console.log('✓ Using Backup source (primary unavailable)');
+    } else {
+        // Both failed
+        console.warn('❌ Both primary and backup sources failed! Using reverse updateAllMinerInfoBackwardsOfflineServer function');
+
+        
+        await updateAllMinerInfoBackwardsOfflineServer(providerParam, blockNumberParam, lastBaseBlock, false);
+
+        startedLogSearch = false;
+        console.log("DONEZONE?");
+        return;
+       // throw new Error('All data sources unavailable');
+    }
+
+    // Update previousChallenge if available from remote
+    if (remotePreviousChallenge) {
+        previousChallenge = remotePreviousChallenge;
+    }
+
+    // Compare and choose the best dataset
+    if (remoteLatestBlock > localLatestBlock) {
+        console.log(`Using REMOTE data from ${remoteSource} (block ${remoteLatestBlock} > local block ${localLatestBlock})`);
+        mined_blocks = remoteMinedBlocks;
+        last_imported_mint_block = remoteLatestBlock;
+
+        // Update localStorage with remote data
+        localStorage.setItem('mintData_EraBitcoin2_afbRAFFABC_B0x1', JSON.stringify(remoteMinedBlocks));
+        localStorage.setItem('lastMintBlock_EraBitcoin2_afbRAFFABC_B0x1', remoteLatestBlock.toString());
+        if (previousChallenge) {
+            localStorage.setItem('mintData_GreekWedding2_B0x1', JSON.stringify(previousChallenge));
+        }
+    } else {
+        console.log(`Using LOCAL data (block ${localLatestBlock} >= remote block ${remoteLatestBlock})`);
+        mined_blocks = localMinedBlocks;
+        last_imported_mint_block = localLatestBlock;
+    }
 
         // Process the chosen mined_blocks array
         console.log('imported', mined_blocks.length, 'transactions');
@@ -858,7 +978,7 @@ let epchCount;
         console.log("Only 1 block or less to search abandoning");
     }
 
-    var iterations = Math.ceil((blocks_to_search / 500));
+    var iterations = Math.ceil((blocks_to_search / 1000));
     if (iterations <= 0) {
         iterations = 1;
     }
@@ -875,17 +995,35 @@ let epchCount;
     var lastrun = 0;
 
     while (run < iterations) {
+        //var percentageofRun = run/interationn;
+        //updateLoadingPercentage(percentageofRun.toFixed(0)); // Shows "Loading info from the blockchain 45% please wait"
+
         let gotLogs = false;  // ✅ guard to ensure only one getLogs call
         const runId = `Run-${run + 1}`;
         lastrun = run;
-        const start = start_log_search_at + (run * 500);
-        const stop = start + 499;
+        const start = start_log_search_at + (run * 1000);
+        const stop = start + 999;
 
         if (runInProgress) {
             console.log('Previous run still in progress, waiting...');
             await sleep(100);
             continue; // Skip this iteration and check again
         }
+
+        
+        var percentageofRun = run/iterations*100;
+        if(iterations > 1000){
+                    updateLoadingPercentage((percentageofRun).toFixed(0) + "% Server and Github Down, will take some time to populate all miner stats "); // Shows "Loading info from the blockchain 45% please wait"
+
+        }
+        else if(iterations > 300){
+                    updateLoadingPercentage((percentageofRun).toFixed(0) + "% Server and Github Down possibly, will take some time "); // Shows "Loading info from the blockchain 45% please wait"
+
+        }else{
+            
+        updateLoadingPercentage((percentageofRun).toFixed(0)+ "%"); // Shows "Loading info from the blockchain 45% please wait"
+        }
+
 
         runInProgress = true; // Lock the run
 
@@ -894,8 +1032,8 @@ let epchCount;
         }
 
         // Calculate block range for this run
-        var start_log_search_at_loop = start_log_search_at + (run * 500);
-        var stop_log_search_at_loop = start_log_search_at_loop + 499;
+        var start_log_search_at_loop = start_log_search_at + (run * 1000);
+        var stop_log_search_at_loop = start_log_search_at_loop + 999;
 
         if (stop_log_search_at_loop > current_eth_block) {
             console.log("Search too long trimmed");
@@ -911,8 +1049,9 @@ let epchCount;
 
         while (!success && runAttempts < maxAttemptsPerRun && lastrun == run) {
             try {
-                if (!getLogs) {
+                if (!getLogs && !isGetLogsRunning) {
                     getLogs = true;
+                    isGetLogsRunning = true;
                     console.log(`${runId}: About to call getLogs`);
                     const result = await provids.getLogs({
                         fromBlock: start_log_search_at_loop,
@@ -926,6 +1065,7 @@ let epchCount;
                     runInProgress = false;
                     lastrun = run + 1;
                     getLogs = false; // Reset for next run
+                    isGetLogsRunning = false; // Reset global lock
                     run = run + 1;
                     success = true;
 
@@ -1071,8 +1211,27 @@ let epchCount;
             } catch (error) {
                 console.log('=== ERROR CAUGHT ===');
                 console.log('Error message:', error ? error.message : 'No error message');
-                console.log('Run:', run + 1, 'Attempt:', runAttempts + 1);
+                console.log('Error code:', error ? error.code : 'No error code');
+                console.log('Run:', run + 1, 'of', iterations, '| Attempt:', runAttempts + 1, 'of', maxAttemptsPerRun);
+                console.log('Block range queried: fromBlock=', start_log_search_at_loop, 'toBlock=', stop_log_search_at_loop);
+                console.log('Current ETH block:', current_eth_block);
+                console.log('Block range size:', stop_log_search_at_loop - start_log_search_at_loop + 1);
+                console.log('Contract address:', ProofOfWorkAddresss);
+                if (error && error.error) {
+                    console.log('Inner error:', error.error);
+                }
+                if (error && error.data) {
+                    console.log('Error data:', error.data);
+                }
+                if (error && error.stack) {
+                    console.log('Stack trace:', error.stack);
+                }
+                console.log('Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
                 console.log('==================');
+
+                // Reset locks on error
+                getLogs = false;
+                isGetLogsRunning = false;
 
                 runAttempts++;
                 run = run - 1;
@@ -1100,6 +1259,21 @@ let epchCount;
         if (run < iterations) {
             await sleep(200);
         }
+        
+                if (run > 0 && run % 20 == 0) {
+                    console.log("20 runs saving");
+                    localStorage.setItem('mintData_EraBitcoin2_afbRAFFABC_B0x1', JSON.stringify(mined_blocks));
+                    localStorage.setItem('mintData_GreekWedding2_B0x1', JSON.stringify(previousChallenge));
+                    if (mined_blocks[0] !== undefined) {
+                        console.log("RUNWorked");
+                        console.log("Setting Currentethblock to it: ", stop_log_search_at_loop);
+                        localStorage.setItem('lastMintBlock_EraBitcoin2_afbRAFFABC_B0x1', stop_log_search_at_loop);
+                    }
+                    localStorage.setItem('lastDifficultyStartBlock_EraBitcoin2_afbRAFFABC_B0x1', last_difficulty_start_block.toString());
+                }
+
+
+
     }
 
     console.log("lastProcessedEpochCount: ", lastProcessedEpochCount);
@@ -1445,34 +1619,7 @@ let epchCount;
     var date_now = new Date();
     var date_of_last_mint = new Date(date_now.getTime() - blocks_since_last_reward * _SECONDS_PER_ETH_BLOCK * 1000)
 
-    function get_date_from_eth_block(eth_block) {
-        const blockTime = new Date(
-            date_of_last_mint.getTime() - ((last_reward_eth_block - eth_block) * _SECONDS_PER_ETH_BLOCK * 1000)
-        );
 
-        const now = new Date();
-        const diffMs = now - blockTime;
-        const diffSec = Math.floor(diffMs / 1000);
-        const diffMin = Math.floor(diffSec / 60);
-        const diffHr = Math.floor(diffMin / 60);
-        const diffDay = Math.floor(diffHr / 24);
-        const diffYr = Math.floor(diffDay / 365);
-
-        let result;
-        if (diffYr >= 1) {
-            result = diffYr === 1 ? "1 year ago" : `${diffYr} years ago`;
-        } else if (diffDay >= 1) {
-            result = diffDay === 1 ? "1 day ago" : `${diffDay} days ago`;
-        } else if (diffHr >= 1) {
-            result = diffHr === 1 ? "1 hr ago" : `${diffHr} hrs ago`;
-        } else if (diffMin >= 1) {
-            result = diffMin === 1 ? "1 min ago" : `${diffMin} mins ago`;
-        } else {
-            result = "just now";
-        }
-
-        return result;
-    }
 
     // Store blocks for pagination
     allMinedBlocks = mined_blocks;
@@ -1480,7 +1627,7 @@ let epchCount;
 
     // Store context needed for rendering
     blockRenderContext = {
-        get_date_from_eth_block,
+        get_relative_time_from_eth_block,
         known_miners,
         _BLOCK_EXPLORER_TX_URL,
         _BLOCK_EXPLORER_BLOCK_URL
@@ -1503,6 +1650,905 @@ let epchCount;
         element.style.whiteSpace = 'nowrap';
     });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    //We want this function to do what updateAllMinerInfo does but instead of going from oldest block -> newest block, 
+    // we instead want to go to from newest block -> oldest block
+    //To do this we need to adjust all the parameters and everything to work backwards intead of forwards
+    //If a scan is inertupted, we want it to get current newest block -> last saved newest block then used saved data then search again starting at the last saved oldest block and moving backwarsd again.
+    //it should display data after certian intervals using miner-stats row-blocks and miner-stats2, first being
+    /*
+   if (!passedDifficultyPeriod && stop_log_search_at_loop < window.cachedContractStats.latestDiffPeriod) {
+            console.log("🔔 CROSSED DIFFICULTY PERIOD");
+            passedDifficultyPeriod = true;
+            */
+
+            // the rest update every 200 interations or runs
+
+
+           // Call it this export async function updateAllMinerInfoBackwardsOfflineServer(providerParam, blockNumberParam = null, lastBaseBlock = null)
+
+
+    //every single variable must be adjusted so the stats display in the correct fashion for the backwards searching. Please update everything so it works 100% just backwards.
+
+// esp epochCount and previousEpochCount it needs to use the correct new order and still get the corret epochs per mint please
+
+
+function renderMinerStatsFromMinedBlocks({
+    mined_blocks,
+    last_difficulty_start_block,
+    estimated_network_hashrate,
+    current_eth_block
+}) {
+    console.log("🎨 Rendering miner stats from mined_blocks");
+
+    /* =========================
+       RESET ALL STATE
+    ========================== */
+
+    let totalZKBTC_Mined = {};
+    let totalZKBTC_Mined_HASH = {};
+    let miner_block_count = {};
+    let miner_block_count2 = {};
+    let miner_block_countHASH = {};
+    let total_mint_count_HASH = {};
+    let total_TOTAL_mint_count_HASH = 0;
+
+    let total_block_count = 0;
+    let total_tx_count = 0;
+    let totalZKTC_Calculated = 0;
+
+    let previousEpoch = null;
+
+    /* =========================
+       AGGREGATE FROM mined_blocks
+       (direction-agnostic)
+    ========================== */
+
+    for (let i = 0; i < mined_blocks.length; i++) {
+        const [ethBlock, txHash, miner, amount, epoch] = mined_blocks[i];
+
+        if (amount === -1 || amount === 0) {
+            // Skip challenge markers (-1) and zero-reward entries (0)
+            previousEpoch = epoch;
+            continue;
+        }
+
+        // Calculate epochs mined by looking at the NEXT entry's epoch
+        // Current entry's miner brought epoch count FROM next entry's epoch TO current epoch
+        // Data is newest-first, so next entry is older with lower epoch
+        let epochsMined = 1;
+
+        // Find next valid (non-challenge, non-zero) entry for epoch calculation
+        let nextEpoch = null;
+        for (let j = i + 1; j < mined_blocks.length; j++) {
+            if (mined_blocks[j][3] !== -1 && mined_blocks[j][3] !== 0) {
+                nextEpoch = mined_blocks[j][4];
+                break;
+            }
+        }
+
+        if (nextEpoch !== null) {
+            const epochDiff = epoch - nextEpoch;  // Should be positive (current > next in newest-first order)
+
+            // Detect contract restart: epoch jumps from very low to very high
+            // (e.g., new contract epoch 4 -> old contract epoch 24445)
+            const isContractRestart = (epoch < 100 && nextEpoch > 1000) ||
+                                       (nextEpoch < 100 && epoch > 1000);
+
+            if (isContractRestart) {
+                epochsMined = 1;
+            } else if (epochDiff > 0 && epochDiff <= 500) {
+                epochsMined = epochDiff;
+            } else if (epochDiff < 0) {
+                // Data might be oldest-first, use absolute value
+                epochsMined = Math.abs(epochDiff) <= 500 ? Math.abs(epochDiff) : 1;
+            }
+            // else keep default of 1 for anomalies
+        }
+
+        previousEpoch = epoch;
+
+        if (ethBlock > last_difficulty_start_block) {
+            miner_block_countHASH[miner] =
+                (miner_block_countHASH[miner] || 0) + amount;
+
+            total_mint_count_HASH[miner] =
+                (total_mint_count_HASH[miner] || 0) + 1;
+
+            totalZKBTC_Mined_HASH[miner] =
+                (totalZKBTC_Mined_HASH[miner] || 0) + epochsMined;
+
+            total_TOTAL_mint_count_HASH += epochsMined;
+        }
+
+        miner_block_count[miner] =
+            (miner_block_count[miner] || 0) + epochsMined;
+
+        miner_block_count2[miner] =
+            (miner_block_count2[miner] || 0) + 1;
+
+        totalZKBTC_Mined[miner] =
+            (totalZKBTC_Mined[miner] || 0) + amount;
+
+
+            if(miner == "0xdfd18d5374df275a8ede107f981f78b1e60f63e4" && epochsMined > 1){
+        console.log("MINER BLOCK COUNT CHECK: MINER: ",miner, " DATA: ",miner_block_count[miner]);
+                
+            }
+        totalZKTC_Calculated += amount;
+        total_block_count += epochsMined;
+        total_tx_count++;
+    }
+
+    /* =========================
+       ===== RECENT MINERS =====
+    ========================== */
+
+    let sorted_recent = [];
+    for (let m in miner_block_countHASH) {
+        sorted_recent.push([
+            m,
+            totalZKBTC_Mined_HASH[m],
+            miner_block_countHASH[m],
+            total_mint_count_HASH[m]
+        ]);
+    }
+
+    sorted_recent.sort((a, b) => b[1] - a[1]);
+
+    let html2 =
+        '<tr><th style="font-size:1.75em">Miner</th>' +
+        '<th>Recent Epochs</th><th>%</th>' +
+        '<th>Hashrate</th><th>Tx</th><th>B0x</th></tr>';
+
+    let pie2 = { data: [], backgroundColor: [], label: 'recent' };
+    let pieLabels2 = [];
+
+    sorted_recent.forEach(m => {
+        const percent = m[1] / total_TOTAL_mint_count_HASH;
+
+        pie2.data.push(m[1]);
+        pie2.backgroundColor.push(getMinerColor(m[0], known_miners));
+        pieLabels2.push(getMinerName(m[0], known_miners));
+
+        html2 += `
+        <tr>
+            <td>${getMinerNameLinkHTML(m[0], known_miners)}</td>
+            <td>${m[1]}</td>
+            <td>${(percent * 100).toFixed(2)}%</td>
+            <td>${convertHashRateToReadable2(percent * estimated_network_hashrate)}</td>
+            <td>${m[3]}</td>
+            <td>${m[2].toFixed(0)} B0x</td>
+        </tr>`;
+    });
+
+    document.querySelector('#minerstats2').innerHTML = html2;
+    document.querySelector('#row-miners2').style.display = 'block';
+    showBlockDistributionPieChart2(pie2, pieLabels2);
+
+    // Update "since last adjustment" heading with epoch count
+    const distHeading2 = document.getElementById('block-distribution-heading2');
+    if (distHeading2) {
+        const recentTxCount = Object.values(total_mint_count_HASH).reduce((a, b) => a + b, 0);
+        distHeading2.textContent = `Block distribution since last adjustment (${total_TOTAL_mint_count_HASH.toLocaleString()} epochs, ${recentTxCount} txs)`;
+    }
+
+    /* =========================
+       ===== ALL MINERS =====
+    ========================== */
+
+    let sorted_all = [];
+    for (let m in miner_block_count) {
+        sorted_all.push([
+            m,
+            miner_block_count[m],
+            totalZKBTC_Mined[m],
+            miner_block_count2[m]
+        ]);
+    }
+
+    sorted_all.sort((a, b) => b[1] - a[1]);
+
+    let html =
+        '<tr><th style="font-size:1.75em">Miner</th>' +
+        '<th>Epochs</th><th>%</th>' +
+        '<th>Tx</th><th>B0x</th></tr>';
+
+    let pie = { data: [], backgroundColor: [], label: 'all' };
+    let pieLabels = [];
+
+    sorted_all.forEach(m => {
+        const percent = m[1] / total_block_count;
+
+        pie.data.push(m[1]);
+        pie.backgroundColor.push(getMinerColor(m[0], known_miners));
+        pieLabels.push(getMinerName(m[0], known_miners));
+
+        html += `
+        <tr>
+            <td>${getMinerNameLinkHTML(m[0], known_miners)}</td>
+            <td>${m[1]}</td>
+            <td>${(percent * 100).toFixed(2)}%</td>
+            <td>${m[3]}</td>
+            <td>${m[2].toFixed(0)} B0x</td>
+        </tr>`;
+    });
+
+    document.querySelector('#minerstats').innerHTML = html;
+    document.querySelector('#row-miners').style.display = 'block';
+
+    showBlockDistributionPieChart(pie, pieLabels);
+
+    /* =========================
+       ===== BLOCK TABLE =====
+    ========================== */
+
+    allMinedBlocks = mined_blocks;
+    currentlyDisplayedBlocks = 0;
+
+    blockRenderContext = {
+        get_relative_time_from_eth_block,
+        known_miners,
+        _BLOCK_EXPLORER_TX_URL,
+        _BLOCK_EXPLORER_BLOCK_URL
+    };
+
+    document.querySelector('#row-blocks').style.display = 'block';
+    document.querySelector('#blockstats').style.display = 'block';
+
+    renderBlocksBatch(0, BLOCKS_PER_PAGE, false);
+
+    /* =========================
+       ===== UPDATE HEADINGS =====
+    ========================== */
+
+    // Calculate block range from mined_blocks for dynamic headings
+    if (mined_blocks.length > 0) {
+        const blockNumbers = mined_blocks.filter(b => b[3] !== -1).map(b => b[0]);
+        if (blockNumbers.length > 0) {
+            const oldestBlock = Math.min(...blockNumbers);
+            const newestBlock = Math.max(...blockNumbers);
+            const oldestTime = get_relative_time_from_eth_block(oldestBlock, current_eth_block);
+
+            // Update "Block distribution since launch" heading
+            const distHeading = document.getElementById('block-distribution-heading');
+            if (distHeading) {
+                distHeading.textContent = `Block distribution (${total_block_count.toLocaleString()} epochs, ${oldestTime})`;
+            }
+
+            // Update "Blocks solved since launch" heading
+            const blocksHeading = document.getElementById('blocks-solved-heading');
+            if (blocksHeading) {
+                blocksHeading.textContent = `Blocks solved (${total_tx_count.toLocaleString()} txs, ${oldestTime})`;
+            }
+        }
+    }
+
+    console.log("✅ Rendering complete");
+}
+
+
+
+
+/**
+ * Backwards mining information update function
+ * Scans from newest block to oldest, processing all mined blocks in reverse
+ * @param {Object} providerParam - Ethers.js provider
+ * @param {number} blockNumberParam - Optional block number from multicall
+ * @param {number} lastBaseBlock - Last difficulty adjustment block
+ 
+export async function updateAllMinerInfoBackwardsOfflineServer(providerParam, blockNumberParam = null, lastBaseBlock = null){
+    console.warn("updateAllMinerInfoBackwardsOfflineServer needs implementing")
+}
+*/
+
+
+
+const MAX_MINTS_INITIAL_LOAD = 3200;
+const LAST_OLDEST_BLOCK_KEY = 'lastOldestMintBlock_EraBitcoin2_afbRAFFABC_B0x1';
+
+
+export async function updateAllMinerInfoBackwardsOfflineServer(
+    providerParam,
+    blockNumberParam = null,
+    lastBaseBlock = null,
+    forceLoadMore = false
+) {
+    console.log('🔄 updateAllMinerInfoBackwardsOfflineServer');
+
+    // Check if another getLogs operation is already running
+    if (isGetLogsRunning) {
+        console.log('⏸️ Another getLogs operation is already running, skipping updateAllMinerInfoBackwardsOfflineServer');
+        return;
+    }
+
+    let provider2 = providerParam;
+
+    let current_eth_block;
+    if (blockNumberParam !== null) {
+        current_eth_block = blockNumberParam - 2;
+    } else {
+        current_eth_block = (await provider2.getBlockNumber()) - 2;
+    }
+
+    const last_difficulty_start_block = window.cachedContractStats.latestDiffPeriod;
+    const estimated_network_hashrate = typeof estHashrate !== 'undefined' ? estHashrate : 0;
+
+    /* =========================
+       LOAD LOCAL STATE
+    ========================== */
+
+    let mined_blocks = [];
+    let previousChallenge = null;
+    let previousEpochCount = null;
+
+    // Use a larger buffer (128 blocks) when defaulting to current block to avoid RPC "height exceeds limit" errors
+    const RPC_BLOCK_BUFFER = 128;
+
+    // First, try to load existing data from updateAllMinerInfo's localStorage
+    let hasExistingData = false;
+    let oldestBlockFromExistingData = null;
+    let newestBlockFromExistingData = null;
+
+    try {
+        const mintData = localStorage.getItem('mintData_EraBitcoin2_afbRAFFABC_B0x1');
+        if (mintData) {
+            mined_blocks = JSON.parse(mintData);
+            if (mined_blocks.length > 0) {
+                hasExistingData = true;
+                previousEpochCount = mined_blocks[mined_blocks.length - 1][4];
+
+                // Find the oldest and newest block numbers in the existing data
+                // mined_blocks format: [block_number, tx_hash, miner_address, amount, epochCount]
+                const blockNumbers = mined_blocks.map(block => block[0]);
+                oldestBlockFromExistingData = Math.min(...blockNumbers);
+                newestBlockFromExistingData = Math.max(...blockNumbers);
+                console.log(`📦 Found existing localStorage data: ${mined_blocks.length} blocks, oldest: ${oldestBlockFromExistingData}, newest: ${newestBlockFromExistingData}`);
+
+                // If existing data has historical coverage, save oldest block to prevent re-scanning
+                // This handles data loaded from JSON that already has complete history
+                const currentStoredOldest = Number(localStorage.getItem(LAST_OLDEST_BLOCK_KEY)) || Infinity;
+                if (oldestBlockFromExistingData < currentStoredOldest) {
+                    localStorage.setItem(LAST_OLDEST_BLOCK_KEY, oldestBlockFromExistingData.toString());
+                    console.log(`📍 Updated LAST_OLDEST_BLOCK_KEY to ${oldestBlockFromExistingData}`);
+                }
+            }
+        }
+
+        const chal = localStorage.getItem('mintData_GreekWedding2_B0x1');
+        if (chal) previousChallenge = JSON.parse(chal);
+
+    } catch (e) {
+        console.warn('⚠️ Failed loading local data:', e);
+        mined_blocks = [];
+        previousEpochCount = null;
+        hasExistingData = false;
+    }
+
+    // Determine the starting point for backward scanning
+    const storedOldestBlock = Number(localStorage.getItem(LAST_OLDEST_BLOCK_KEY));
+    let lastOldestScannedBlock;
+
+    if (hasExistingData && oldestBlockFromExistingData) {
+        // Use the oldest block from existing data as starting point
+        // This ensures we continue from where updateAllMinerInfo's data ends
+        lastOldestScannedBlock = Math.min(
+            oldestBlockFromExistingData,
+            storedOldestBlock || oldestBlockFromExistingData
+        );
+        console.log(`📍 Using oldest block from existing data: ${lastOldestScannedBlock}`);
+    } else {
+        // No existing data, use our own stored value or default
+        lastOldestScannedBlock = storedOldestBlock || (current_eth_block - RPC_BLOCK_BUFFER);
+    }
+
+    // Also ensure we're never querying too close to the tip, even if stored value is recent
+    if (lastOldestScannedBlock > current_eth_block - RPC_BLOCK_BUFFER) {
+        console.log(`⚠️ lastOldestScannedBlock (${lastOldestScannedBlock}) too close to tip, adjusting to ${current_eth_block - RPC_BLOCK_BUFFER}`);
+        lastOldestScannedBlock = current_eth_block - RPC_BLOCK_BUFFER;
+    }
+
+    console.log(`📍 Backward scan: storedBlock=${storedOldestBlock || 'none'}, existingDataOldest=${oldestBlockFromExistingData || 'none'}, using=${lastOldestScannedBlock}, currentBlock=${current_eth_block}`);
+
+    /* =========================
+       FORWARD SCAN (NEW BLOCKS)
+    ========================== */
+
+    // Scan for new blocks minted AFTER our existing data
+    if (hasExistingData && newestBlockFromExistingData) {
+        const forwardScanStart = newestBlockFromExistingData + 1;
+        const forwardScanEnd = current_eth_block - RPC_BLOCK_BUFFER;
+
+        if (forwardScanStart < forwardScanEnd) {
+            console.log(`⏩ Forward scan for new blocks: ${forwardScanStart} → ${forwardScanEnd}`);
+
+            const forwardBlocksToScan = forwardScanEnd - forwardScanStart;
+            const forwardIterations = Math.ceil(forwardBlocksToScan / 1000);
+
+            // Get the epoch count from the newest existing block for continuity
+            // mined_blocks is newest-first, so first non-challenge entry has the highest epoch
+            let forwardPreviousEpoch = null;
+            for (let i = 0; i < mined_blocks.length; i++) {
+                if (mined_blocks[i][3] !== -1) {
+                    forwardPreviousEpoch = mined_blocks[i][4];
+                    break;
+                }
+            }
+
+            // Get the challenge from the newest block
+            // If previousChallenge is null, extract it from the newest existing block to avoid spurious "New Challenge" markers
+            let forwardPreviousChallenge = previousChallenge;
+            if (!forwardPreviousChallenge && mined_blocks.length > 0) {
+                // Find the first entry with actual data (we need to fetch challenge from chain or skip challenge detection)
+                // For now, set to a placeholder that will be updated on first block
+                console.log('⚠️ previousChallenge is null, will detect from first forward block');
+            }
+
+            // Collect new blocks to prepend
+            let newBlocks = [];
+
+            for (let fRun = 0; fRun < forwardIterations; fRun++) {
+                const fFromBlock = forwardScanStart + (fRun * 1000);
+                let fToBlock = fFromBlock + 999;
+
+                if (fToBlock > forwardScanEnd) {
+                    fToBlock = forwardScanEnd;
+                }
+
+                console.log(`⏩ Forward run ${fRun + 1}/${forwardIterations}: ${fFromBlock} → ${fToBlock}`);
+
+                if (isGetLogsRunning) {
+                    console.log('⏸️ Another getLogs operation is running, waiting...');
+                    await sleep(500);
+                    continue;
+                }
+
+                let forwardLogs;
+                try {
+                    isGetLogsRunning = true;
+                    forwardLogs = await provider2.getLogs({
+                        fromBlock: fFromBlock,
+                        toBlock: fToBlock,
+                        address: ProofOfWorkAddresss,
+                        topics: [_MINT_TOPIC],
+                    });
+                    isGetLogsRunning = false;
+                } catch (error) {
+                    isGetLogsRunning = false;
+                    console.warn('⚠️ Forward scan error:', error.message);
+                    await sleep(1000);
+                    continue;
+                }
+
+                // Process logs in natural order (oldest to newest)
+                for (let i = 0; i < forwardLogs.length; i++) {
+                    const tx = forwardLogs[i];
+                    const block_number = tx.blockNumber;
+                    const tx_hash = tx.transactionHash;
+                    const miner_address = getMinerAddressFromTopic(tx.topics[1]);
+                    const data = tx.data;
+
+                    const dataAmt = parseInt(data.substring(2, 66), 16) / 1e18;
+                    const epochCount = parseInt(data.substring(66, 130), 16);
+
+                    // Challenge change detection
+                    const challenger = data.substring(130, 194);
+                    if (forwardPreviousChallenge && forwardPreviousChallenge !== challenger) {
+                        // Only add challenge marker if we have a previous reference AND it changed
+                        newBlocks.push([
+                            block_number,
+                            tx_hash,
+                            miner_address,
+                            -1,
+                            epochCount
+                        ]);
+                    }
+                    forwardPreviousChallenge = challenger;
+
+                    newBlocks.push([
+                        block_number,
+                        tx_hash,
+                        miner_address,
+                        dataAmt,
+                        epochCount
+                    ]);
+
+                    forwardPreviousEpoch = epochCount;
+                }
+
+                await sleep(200);
+            }
+
+            // Prepend new blocks to existing data (newest-first order)
+            // newBlocks is oldest-to-newest from forward scan, so reverse it
+            if (newBlocks.length > 0) {
+                newBlocks.reverse();
+                mined_blocks = [...newBlocks, ...mined_blocks];
+                previousChallenge = forwardPreviousChallenge;
+
+                console.log(`✅ Forward scan complete: added ${newBlocks.length} new entries`);
+
+                // Save progress
+                localStorage.setItem('mintData_EraBitcoin2_afbRAFFABC_B0x1', JSON.stringify(mined_blocks));
+                localStorage.setItem('mintData_GreekWedding2_B0x1', JSON.stringify(previousChallenge));
+            } else {
+                console.log('⏩ Forward scan complete: no new blocks found');
+            }
+        } else {
+            console.log('⏩ No new blocks to scan (already up to date)');
+        }
+    }
+
+    /* =========================
+       CHECK MINT LIMIT
+    ========================== */
+
+    // Count actual mints (exclude challenge markers with amount === -1)
+    const actualMintCount = mined_blocks.filter(block => block[3] !== -1).length;
+    
+    if (!forceLoadMore && actualMintCount >= MAX_MINTS_INITIAL_LOAD) {
+        console.log(`✅ Already loaded ${actualMintCount} mints (limit: ${MAX_MINTS_INITIAL_LOAD})`);
+        console.log('💡 Click "Load More Blocks" to continue scanning');
+        
+                    if (typeof renderMinerStatsFromMinedBlocks === 'function') {
+                renderMinerStatsFromMinedBlocks({
+                    mined_blocks,
+                    last_difficulty_start_block,
+                    estimated_network_hashrate,
+                    current_eth_block
+                });
+            }
+
+
+        // Show the load more button
+        const loadMoreBtn = document.getElementById('blocks-load-more-btn');
+        if (loadMoreBtn) {
+            loadMoreBtn.style.display = 'block';
+        }
+        
+        return;
+    }
+
+    /* =========================
+       SCAN RANGE (BACKWARDS)
+    ========================== */
+
+    const ETH_START_BLOCK = 36342640;  // First mining activity block
+    const scanEndBlock = Math.max(ETH_START_BLOCK, ETH_START_BLOCK);
+    const scanStartBlock = lastOldestScannedBlock;
+
+    if (scanStartBlock <= scanEndBlock) {
+        console.log('✅ No backward blocks left to scan');
+        
+
+
+
+        // Hide the load more button since we're done
+        const loadMoreBtn = document.getElementById('blocks-load-more-btn');
+        if (loadMoreBtn) {
+            loadMoreBtn.style.display = 'none';
+        }
+        
+        return;
+    }
+
+    const blocksToScan = scanStartBlock - scanEndBlock;
+    const iterations = Math.ceil(blocksToScan / 1000);
+
+    console.log(`⏪ Backward scanning ${blocksToScan} blocks in ${iterations} runs`);
+
+    /* =========================
+       CORE STATE
+    ========================== */
+
+        let passedDiff = false;
+    let run = 0;
+    let passedDifficultyPeriod = false;
+    let shouldStopDueToLimit = false;
+    let lastProcessedFromBlock = scanStartBlock; // Track for saving outside loop
+
+    while (run < iterations && !shouldStopDueToLimit) {
+        const toBlock = scanStartBlock - (run * 1000);
+        let fromBlock = toBlock - 999;
+
+        if (fromBlock < scanEndBlock) {
+            fromBlock = scanEndBlock;
+        }
+
+        // Only swap if fromBlock exceeds toBlock (edge case when near scanEndBlock)
+        if (fromBlock > toBlock) {
+            console.log(`⚠️ Swapping blocks: fromBlock (${fromBlock}) > toBlock (${toBlock})`);
+            const temp = fromBlock;
+            fromBlock = toBlock;
+            toBlock = temp;
+        }
+
+        // Update tracker after all adjustments
+        lastProcessedFromBlock = fromBlock;
+
+        // RPC must ALWAYS be forward (fromBlock <= toBlock)
+        const queryFrom = fromBlock; // lower
+        const queryTo = toBlock;   // higher
+        const blocksBehindTip = current_eth_block - queryTo;
+        console.log(`⏪ Run ${run + 1}: ${queryFrom} → ${queryTo} (${blocksBehindTip} blocks behind current tip ${current_eth_block})`);
+
+        // Check if another getLogs operation is running
+        if (isGetLogsRunning) {
+            console.log('⏸️ Another getLogs operation is running, skipping this run...');
+            await sleep(500);
+            continue;
+        }
+
+        let logs;
+        try {
+            isGetLogsRunning = true;
+            logs = await provider2.getLogs({
+                fromBlock: queryFrom,
+                toBlock: queryTo,
+                address: ProofOfWorkAddresss,
+                topics: [_MINT_TOPIC],
+            });
+            isGetLogsRunning = false; // Reset lock after successful getLogs
+        } catch (error) {
+            isGetLogsRunning = false; // Reset lock on error
+            const errorMsg = error ? error.message : '';
+            const errorCode = error ? error.code : null;
+
+            console.log('=== BACKWARD SCAN ERROR ===');
+            console.log('Error message:', errorMsg || 'No error message');
+            console.log('Error code:', errorCode || 'No error code');
+            console.log('Run:', run + 1, 'of', iterations);
+            console.log('Block range queried: fromBlock=', queryFrom, 'toBlock=', queryTo);
+            console.log('scanStartBlock:', scanStartBlock, 'scanEndBlock:', scanEndBlock);
+            console.log('Block range size:', queryTo - queryFrom + 1);
+            console.log('Contract address:', ProofOfWorkAddresss);
+            if (error && error.error) {
+                console.log('Inner error:', error.error);
+            }
+            if (error && error.data) {
+                console.log('Error data:', error.data);
+            }
+            console.log('===========================');
+
+            // Check if this is an RPC limitation that won't be resolved by retrying
+            const isRpcLimitation =
+                errorMsg.includes('height of queried block exceeds the limit') ||
+                errorMsg.includes('block range') ||
+                errorMsg.includes('exceeds maximum') ||
+                errorMsg.includes('Log response size exceeded') ||
+                errorCode === -32603;
+
+            if (isRpcLimitation) {
+                console.log('⛔ RPC LIMITATION DETECTED: Your RPC provider does not support querying historical logs this far back.');
+                console.log('💡 Solutions:');
+                console.log('   1. Use an RPC with archive node access (Alchemy, QuickNode, Infura)');
+                console.log('   2. Wait for the JSON data sources to come back online');
+                console.log('   3. The public Base RPC (mainnet.base.org) has limited historical log access');
+                console.log('🛑 Stopping backward scan - retrying will not help.');
+
+                // Save whatever progress we have
+                if (mined_blocks.length > 0) {
+                    localStorage.setItem('mintData_EraBitcoin2_afbRAFFABC_B0x1', JSON.stringify(mined_blocks));
+                    console.log(`💾 Saved ${mined_blocks.length} blocks before stopping`);
+                }
+
+                // Exit the loop entirely
+                break;
+            }
+
+            // For other errors, skip this batch and continue
+            run++;
+            await sleep(1000);
+            continue;
+        }
+
+        // logs come oldest → newest
+        // reverse to process newest → oldest
+        logs.reverse();
+        for (let i = 0; i < logs.length; i++) {
+            const tx = logs[i];
+            const block_number = tx.blockNumber;
+            const tx_hash = tx.transactionHash;
+            const miner_address = getMinerAddressFromTopic(tx.topics[1]);
+            const data = tx.data;
+
+            const dataAmt = parseInt(data.substring(2, 66), 16) / 1e18;
+            const epochCount = parseInt(data.substring(66, 130), 16);
+
+            let epochsMined;
+            if (previousEpochCount === null) {
+                epochsMined = epochCount;
+            } else {
+                epochsMined = previousEpochCount - epochCount;
+            }
+
+            if (epochsMined < 0) epochsMined = 1;
+
+            previousEpochCount = epochCount;
+
+            /* === CHALLENGE CHANGE === */
+            const challenger = data.substring(130, 194);
+            if (previousChallenge && previousChallenge !== challenger) {
+                // Only add challenge marker if we have a previous reference AND it changed
+                mined_blocks.push([
+                    block_number,
+                    tx_hash,
+                    miner_address,
+                    -1,
+                    epochCount
+                ]);
+            }
+            previousChallenge = challenger;
+
+            mined_blocks.push([
+                block_number,
+                tx_hash,
+                miner_address,
+                dataAmt,
+                epochCount
+            ]);
+
+            /* === CHECK MINT LIMIT === */
+            if (!forceLoadMore) {
+                const currentMintCount = mined_blocks.filter(block => block[3] !== -1).length;
+                if (currentMintCount >= MAX_MINTS_INITIAL_LOAD) {
+                    console.log(`🛑 Reached ${MAX_MINTS_INITIAL_LOAD} mints limit`);
+                    shouldStopDueToLimit = true;
+                    break;
+                }
+            }
+
+            /* === DIFFICULTY PERIOD MARKER === */
+            if (!passedDifficultyPeriod && block_number < (window.cachedContractStats?.latestDiffPeriod || 0)) {
+                console.log("🔔 CROSSED DIFFICULTY PERIOD");
+                passedDifficultyPeriod = true;
+            }
+        }
+
+        /* =========================
+           PERIODIC UI + SAVE
+        ========================== */
+
+        if (run % 20 == 18 || ((passedDifficultyPeriod && !passedDiff) || (shouldStopDueToLimit && !passedDiff))){
+            passedDiff = true;
+            console.log('💾 Saving backward progress');
+
+            localStorage.setItem(
+                'mintData_EraBitcoin2_afbRAFFABC_B0x1',
+                JSON.stringify(mined_blocks)
+            );
+            localStorage.setItem(
+                'mintData_GreekWedding2_B0x1',
+                JSON.stringify(previousChallenge)
+            );
+            localStorage.setItem(
+                LAST_OLDEST_BLOCK_KEY,
+                fromBlock.toString()
+            );
+
+            // trigger partial UI refresh
+            const rowBlocks = document.querySelector('#row-blocks');
+            const minerStats = document.querySelector('#minerstats');
+            
+            if (rowBlocks) rowBlocks.style.display = 'block';
+            if (minerStats) minerStats.style.display = 'block';
+            
+            if (typeof renderMinerStatsFromMinedBlocks === 'function') {
+                renderMinerStatsFromMinedBlocks({
+                    mined_blocks,
+                    last_difficulty_start_block,
+                    estimated_network_hashrate,
+                    current_eth_block
+                });
+            }
+        }
+
+        run++;
+        await sleep(200);
+    }
+
+    /* =========================
+       FINAL SAVE
+    ========================== */
+
+    localStorage.setItem(
+        'mintData_EraBitcoin2_afbRAFFABC_B0x1',
+        JSON.stringify(mined_blocks)
+    );
+    localStorage.setItem(
+        'mintData_GreekWedding2_B0x1',
+        JSON.stringify(previousChallenge)
+    );
+    localStorage.setItem(
+        LAST_OLDEST_BLOCK_KEY,
+        lastProcessedFromBlock.toString()
+    );
+
+    if (typeof renderMinerStatsFromMinedBlocks === 'function') {
+        renderMinerStatsFromMinedBlocks({
+            mined_blocks,
+            last_difficulty_start_block,
+            estimated_network_hashrate,
+            current_eth_block
+        });
+    }
+
+    // Show/hide load more button based on completion
+    const loadMoreBtn = document.getElementById('blocks-load-more-btn');
+    if (loadMoreBtn) {
+        if (shouldStopDueToLimit && scanStartBlock > scanEndBlock) {
+            loadMoreBtn.style.display = 'block';
+            console.log('💡 Click "Load More Blocks" to continue scanning');
+        } else {
+            loadMoreBtn.style.display = 'none';
+        }
+    }
+
+    console.log('✅ Backward scan complete');
+}
+
+
+
+
+/**
+ * Get relative time from block number (e.g., "2 hours ago")
+ * @param {number} blockNumber - The block number
+ * @param {number} currentBlock - Optional current block number
+ * @returns {string} Relative time string
+ */
+function get_relative_time_from_eth_block(blockNumber, currentBlock = null) {
+    const current = currentBlock || 
+                    (typeof window !== 'undefined' && window.cachedContractStats?.blockNumber) || 
+                    blockNumber;
+   // console.log("Current block number: ", current, " vs input blockNumber: ",blockNumber);
+    
+    const blockDiff = current - blockNumber;
+    const secondsDiff = blockDiff * 2;
+
+    //const now = new Date();
+    const diffMs = secondsDiff*1000;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHr = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHr / 24);
+    const diffYr = Math.floor(diffDay / 365);
+
+    let result;
+    if (diffYr >= 1) {
+        result = diffYr === 1 ? "1 year ago" : `${diffYr} years ago`;
+    } else if (diffDay >= 1) {
+        result = diffDay === 1 ? "1 day ago" : `${diffDay} days ago`;
+    } else if (diffHr >= 1) {
+        result = diffHr === 1 ? "1 hr ago" : `${diffHr} hrs ago`;
+    } else if (diffMin >= 1) {
+        result = diffMin === 1 ? "1 min ago" : `${diffMin} mins ago`;
+    } else {
+        result = "just now";
+    }
+
+    return result;
+
+
+}
+
+
 
 // Export all functions
 export default {

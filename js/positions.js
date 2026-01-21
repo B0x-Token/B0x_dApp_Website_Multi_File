@@ -505,14 +505,15 @@ export async function getTokenIDsOwnedByMetamask(forceRefresh = false) {
     const now = Date.now();
     const sameAddress = lastPositionFetchAddress === window.userAddress;
     const cacheValid = (now - lastPositionFetchTime) < POSITION_CACHE_DURATION;
-
+    console.log("Call to getTokenIDsOwnedByMetamask");
     // Skip if cache is valid and same address (unless forced)
     if (!forceRefresh && sameAddress && cacheValid && Object.keys(positionData).length >= 0) {
         console.log("Using cached position data (last fetch:", Math.round((now - lastPositionFetchTime) / 1000), "seconds ago)");
+        //await loadPositionsIntoDappSelections();
         return;
     }
 
-    console.log("Fetching fresh position data...");
+    console.log("Call to getTokenIDsOwnedByMetamask 11 Fetching fresh position data...");
     lastPositionFetchTime = now;
     lastPositionFetchAddress = window.userAddress;
 
@@ -527,7 +528,7 @@ export async function getTokenIDsOwnedByMetamask(forceRefresh = false) {
  * @returns {Promise<void>}
  */
 async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
-    await sleep(2000);
+    await sleep(200);
     console.log("Calling findUserTokenIds for:", ADDRESSTOSEARCHOF);
 
     // Clear position data at the start
@@ -537,6 +538,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
 
     if (!window.walletConnected) {
         await window.connectWallet();
+        return;
     }
 
     // Multicall3 ABI for batching calls
@@ -655,11 +657,14 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
     let totalStakedToken0 = toBigNumber(0);
     let totalStakedToken1 = toBigNumber(0);
     let lastSpotTosetStartSearchAt = -1;
-
+    let setx = 0;
     // Wait for nftOwners to be loaded first (needed for unstaked positions)
     while (isSearchingLogs()) {
-        await sleep(1000);
-        console.log("Waiting for log search to complete...");
+        if(setx%5==0){
+            console.log("Waiting for log search to complete...");
+        }
+        setx = setx + 1;
+        await sleep(250);
     }
     nftOwners = await getNFTOwners();
 
@@ -673,11 +678,11 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
     }
     console.log(`Found ${userTokenIds.length} unstaked NFTs for user`);
 
-    // Limit unstaked positions to first 25 for initial multicall
-    const unstakedBatch = userTokenIds.slice(0, 25);
+    // Limit unstaked positions to first 50 for initial multicall
+    const unstakedBatch = userTokenIds.slice(0, 50);
 
     // ============================================
-    // FIRST MULTICALL: getMaxStakedIDforUser + 25 staked positions + 25 unstaked positions
+    // FIRST MULTICALL: getMaxStakedIDforUser + 50 staked positions + 50 unstaked positions
     // ============================================
     console.log("=== MULTICALL #1: Fetching max staked ID + initial positions ===");
 
@@ -690,7 +695,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
         callData: positionFinderInterface.encodeFunctionData('getMaxStakedIDforUser', [window.userAddress])
     });
 
-    // Call 2: getIDSofStakedTokensForUserwithMinimum (first 25 staked positions)
+    // Call 2: getIDSofStakedTokensForUserwithMinimum (first 50 staked positions)
     calls.push({
         target: contractAddress_PositionFinderPro,
         allowFailure: true,
@@ -700,12 +705,12 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
             Address_ZEROXBTC_TESTNETCONTRACT,
             minStaking,
             0,  // startIndex
-            25, // count - assume 25 max initially
+            50, // count - assume 50 max initially
             HookAddress
         ])
     });
 
-    // Call 3: findUserTokenIdswithMinimumIndividual (first 25 unstaked positions)
+    // Call 3: findUserTokenIdswithMinimumIndividual (first 50 unstaked positions)
     if (unstakedBatch.length > 0) {
         calls.push({
             target: contractAddress_PositionFinderPro,
@@ -803,21 +808,21 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
     }
 
     // ============================================
-    // ADDITIONAL MULTICALLS: If more than 25 staked positions exist
+    // ADDITIONAL MULTICALLS: If more than 50 staked positions exist
     // ============================================
-    if (maxTokenPossible_STAKING > 25) {
-        console.log(`Max staked ID (${maxTokenPossible_STAKING}) > 25, fetching additional staked positions...`);
+    if (maxTokenPossible_STAKING > 50) {
+        console.log(`Max staked ID (${maxTokenPossible_STAKING}) > 50, fetching additional staked positions...`);
 
-        // Calculate how many more batches we need (25 positions per batch)
-        const remainingPositions = maxTokenPossible_STAKING - 25;
-        const additionalBatches = Math.ceil(remainingPositions / 25);
+        // Calculate how many more batches we need (50 positions per batch)
+        const remainingPositions = maxTokenPossible_STAKING - 50;
+        const additionalBatches = Math.ceil(remainingPositions / 50);
 
         for (let batchNum = 1; batchNum <= additionalBatches; batchNum++) {
             // 1 second delay between multicalls
             await sleep(1000);
 
-            const startIndex = batchNum * 25;
-            console.log(`=== MULTICALL #${batchNum + 1}: Fetching staked positions ${startIndex} to ${startIndex + 25} ===`);
+            const startIndex = batchNum * 50;
+            console.log(`=== MULTICALL #${batchNum + 1}: Fetching staked positions ${startIndex} to ${startIndex + 50} ===`);
 
             const additionalCalls = [{
                 target: contractAddress_PositionFinderPro,
@@ -828,7 +833,7 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
                     Address_ZEROXBTC_TESTNETCONTRACT,
                     minStaking,
                     startIndex,
-                    25,
+                    50,
                     HookAddress
                 ])
             }];
@@ -920,7 +925,6 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
         }
     }
 
-    await loadPositionsIntoDappSelections();
 
     // ============================================
     // PROCESS UNSTAKED POSITIONS
@@ -946,12 +950,12 @@ async function getTokenIDsOwnedByUser(ADDRESSTOSEARCHOF) {
         unstakedPoolInfoi = unstakedPoolInfoi.concat(unstakedResult[7]);
     }
 
-    // Fetch remaining unstaked positions if more than 25
-    if (userTokenIds.length > 25) {
-        console.log(`More than 25 unstaked positions (${userTokenIds.length}), fetching additional batches...`);
+    // Fetch remaining unstaked positions if more than 50
+    if (userTokenIds.length > 50) {
+        console.log(`More than 50 unstaked positions (${userTokenIds.length}), fetching additional batches...`);
 
-        const batchSize = 25;
-        for (let i = 25; i < userTokenIds.length; i += batchSize) {
+        const batchSize = 50;
+        for (let i = 50; i < userTokenIds.length; i += batchSize) {
             // 1 second delay between multicalls
             await sleep(1000);
 

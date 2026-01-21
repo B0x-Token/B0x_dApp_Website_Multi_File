@@ -108,7 +108,7 @@ export const CONFIG = {
     MAX_BLOCKS_PER_REQUEST: 499,
     MAX_RETRIES: 5,
     BASE_RETRY_DELAY: 1000,
-    RATE_LIMIT_DELAY: 1250,
+    RATE_LIMIT_DELAY: 250,
     NFT_ADDRESS: "0x7C5f5A4bBd8fD63184577525326123B519429bDc",
     MULTICALL_ADDRESS: "0xcA11bde05977b3631167028862bE2a173976CA11",
     TRANSFER_TOPIC: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -672,6 +672,246 @@ export function saveMinUserHoldings() {
 
     showSuccessMessage('holdingsSuccess');
     showToast(`Minimum user holdings set to ${value} tokens`);
+}
+
+// ============================================
+// OFFLINE DATA MANAGEMENT
+// ============================================
+
+/**
+ * Initializes the data source URL links in the settings UI
+ */
+export function initDataSourceLinks() {
+    const minedBlocksPrimary = document.getElementById('minedBlocksUrlPrimary');
+    const minedBlocksBackup = document.getElementById('minedBlocksUrlBackup');
+    const uniswapPrimary = document.getElementById('uniswapDataUrlPrimary');
+    const uniswapBackup = document.getElementById('uniswapDataUrlBackup');
+
+    const primaryBase = customDataSource || defaultDataSource_Testnet;
+    const backupBase = customBACKUPDataSource || defaultBACKUPDataSource_Testnet;
+
+    if (minedBlocksPrimary) {
+        minedBlocksPrimary.href = primaryBase + 'mined_blocks_mainnet.json';
+        minedBlocksPrimary.textContent = primaryBase + 'mined_blocks_mainnet.json';
+    }
+    if (minedBlocksBackup) {
+        minedBlocksBackup.href = backupBase + 'mined_blocks_mainnet.json';
+        minedBlocksBackup.textContent = '(Backup) ' + backupBase + 'mined_blocks_mainnet.json';
+    }
+    if (uniswapPrimary) {
+        uniswapPrimary.href = primaryBase + 'mainnet_uniswap_v4_data.json';
+        uniswapPrimary.textContent = primaryBase + 'mainnet_uniswap_v4_data.json';
+    }
+    if (uniswapBackup) {
+        uniswapBackup.href = backupBase + 'mainnet_uniswap_v4_data.json';
+        uniswapBackup.textContent = '(Backup) ' + backupBase + 'mainnet_uniswap_v4_data.json';
+    }
+}
+
+/**
+ * Handles upload of mined_blocks_mainnet.json file
+ */
+export function handleMinedBlocksUpload() {
+    const fileInput = document.getElementById('uploadMinedBlocks');
+    const statusEl = document.getElementById('minedBlocksUploadStatus');
+
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        if (statusEl) statusEl.innerHTML = '<span style="color: red;">Please select a file first.</span>';
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+
+            // Handle both formats: raw array OR object with mined_blocks key
+            let minedBlocks;
+            let latestBlock = null;
+            let previousChallenge = null;
+
+            if (Array.isArray(data)) {
+                // Raw array format
+                minedBlocks = data;
+                // Try to find latest block from the data
+                if (minedBlocks.length > 0) {
+                    latestBlock = Math.max(...minedBlocks.map(b => b[0]));
+                }
+            } else if (data.mined_blocks && Array.isArray(data.mined_blocks)) {
+                // Object format with mined_blocks key
+                minedBlocks = data.mined_blocks;
+                latestBlock = data.latest_block_number || null;
+                previousChallenge = data.previous_challenge || null;
+            } else {
+                throw new Error('Invalid format: expected array or object with mined_blocks array');
+            }
+
+            if (!minedBlocks || minedBlocks.length === 0) {
+                throw new Error('No mined blocks found in file');
+            }
+
+            // Save to localStorage
+            localStorage.setItem('mintData_EraBitcoin2_afbRAFFABC_B0x1', JSON.stringify(minedBlocks));
+
+            if (latestBlock) {
+                localStorage.setItem('lastMintBlock_EraBitcoin2_afbRAFFABC_B0x1', latestBlock.toString());
+            }
+
+            if (previousChallenge) {
+                localStorage.setItem('mintData_GreekWedding2_B0x1', JSON.stringify(previousChallenge));
+            }
+
+            // Clear the oldest block key so backward scan knows data is fresh
+            localStorage.removeItem('lastOldestMintBlock_EraBitcoin2_afbRAFFABC_B0x1');
+
+            if (statusEl) {
+                statusEl.innerHTML = `<span style="color: green;">Success! Loaded ${minedBlocks.length} blocks. Reloading page...</span>`;
+            }
+
+            showToast(`Uploaded ${minedBlocks.length} mined blocks successfully!`);
+
+            // Reload page after short delay
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+
+        } catch (err) {
+            console.error('Error parsing mined blocks file:', err);
+            if (statusEl) statusEl.innerHTML = `<span style="color: red;">Error: ${err.message}</span>`;
+            showToast('Failed to parse mined blocks file', true);
+        }
+    };
+
+    reader.onerror = function() {
+        if (statusEl) statusEl.innerHTML = '<span style="color: red;">Error reading file.</span>';
+    };
+
+    reader.readAsText(file);
+}
+
+/**
+ * Handles upload of mainnet_uniswap_v4_data.json file
+ */
+export function handleUniswapDataUpload() {
+    const fileInput = document.getElementById('uploadUniswapData');
+    const statusEl = document.getElementById('uniswapDataUploadStatus');
+
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        if (statusEl) statusEl.innerHTML = '<span style="color: red;">Please select a file first.</span>';
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+
+            // Basic validation - should be an object or array
+            if (typeof data !== 'object') {
+                throw new Error('Invalid format: expected JSON object or array');
+            }
+
+            // Save to localStorage
+            localStorage.setItem('testnet_uniswap_v4_local_data', JSON.stringify(data));
+
+            const itemCount = Array.isArray(data) ? data.length : Object.keys(data).length;
+
+            if (statusEl) {
+                statusEl.innerHTML = `<span style="color: green;">Success! Loaded ${itemCount} items. Reloading page...</span>`;
+            }
+
+            showToast(`Uploaded Uniswap V4 data successfully!`);
+
+            // Reload page after short delay
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+
+        } catch (err) {
+            console.error('Error parsing Uniswap data file:', err);
+            if (statusEl) statusEl.innerHTML = `<span style="color: red;">Error: ${err.message}</span>`;
+            showToast('Failed to parse Uniswap data file', true);
+        }
+    };
+
+    reader.onerror = function() {
+        if (statusEl) statusEl.innerHTML = '<span style="color: red;">Error reading file.</span>';
+    };
+
+    reader.readAsText(file);
+}
+
+/**
+ * Downloads current mined blocks data from localStorage
+ */
+export function downloadMinedBlocksData() {
+    const minedBlocks = localStorage.getItem('mintData_EraBitcoin2_afbRAFFABC_B0x1');
+    const latestBlock = localStorage.getItem('lastMintBlock_EraBitcoin2_afbRAFFABC_B0x1');
+    const previousChallenge = localStorage.getItem('mintData_GreekWedding2_B0x1');
+
+    if (!minedBlocks) {
+        showToast('No mined blocks data found in localStorage', true);
+        return;
+    }
+
+    try {
+        const data = {
+            mined_blocks: JSON.parse(minedBlocks),
+            latest_block_number: latestBlock ? parseInt(latestBlock) : null,
+            previous_challenge: previousChallenge ? JSON.parse(previousChallenge) : null
+        };
+
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'mined_blocks_mainnet.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showToast(`Downloaded ${data.mined_blocks.length} mined blocks`);
+    } catch (err) {
+        console.error('Error downloading mined blocks:', err);
+        showToast('Failed to download mined blocks data', true);
+    }
+}
+
+/**
+ * Downloads current Uniswap V4 data from localStorage
+ */
+export function downloadUniswapData() {
+    const uniswapData = localStorage.getItem('testnet_uniswap_v4_local_data');
+
+    if (!uniswapData) {
+        showToast('No Uniswap V4 data found in localStorage', true);
+        return;
+    }
+
+    try {
+        const data = JSON.parse(uniswapData);
+
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'mainnet_uniswap_v4_data.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        const itemCount = Array.isArray(data) ? data.length : Object.keys(data).length;
+        showToast(`Downloaded Uniswap V4 data (${itemCount} items)`);
+    } catch (err) {
+        console.error('Error downloading Uniswap data:', err);
+        showToast('Failed to download Uniswap V4 data', true);
+    }
 }
 
 // ============================================
